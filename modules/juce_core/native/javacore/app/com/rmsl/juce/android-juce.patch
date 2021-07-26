@@ -1,0 +1,20 @@
+diff --git a/modules/juce_core/native/javacore/app/com/rmsl/juce/JuceApp.java b/modules/juce_core/native/javacore/app/com/rmsl/juce/JuceApp.java
+index c48e27e93..c5fcec4be 100644
+--- a/modules/juce_core/native/javacore/app/com/rmsl/juce/JuceApp.java
++++ b/modules/juce_core/native/javacore/app/com/rmsl/juce/JuceApp.java
+@@ -22,6 +22,7 @@
+ 
+ package com.rmsl.juce;
+ 
++import com.bose.pinpoint.PinPoint;
+ import com.rmsl.juce.Java;
+ 
+ import android.app.Application;
+@@ -32,6 +33,7 @@ public class JuceApp extends Application
+     public void onCreate()
+     {
+         super.onCreate();
++        PinPoint.configure(getAssets()); // add this line
+         Java.initialiseJUCE (this);
+     }
+ }
