@@ -22,6 +22,7 @@
 
 package com.rmsl.juce;
 
+import com.bose.pinpoint.PinPoint;
 import com.rmsl.juce.Java;
 
 import android.app.Application;
@@ -32,6 +33,7 @@ public class JuceApp extends Application
     public void onCreate()
     {
         super.onCreate();
+        PinPoint.configure(getAssets());
         Java.initialiseJUCE (this);
     }
 }
