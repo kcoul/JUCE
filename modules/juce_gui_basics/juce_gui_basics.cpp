@@ -66,6 +66,7 @@
  #include <windowsx.h>
  #include <vfw.h>
  #include <commdlg.h>
+ #include <commctrl.h>
 
  #if ! JUCE_MINGW
   #include <UIAutomation.h>
@@ -82,6 +83,7 @@
  #elif ! JUCE_DONT_AUTOLINK_TO_WIN32_LIBRARIES
   #pragma comment(lib, "vfw32.lib")
   #pragma comment(lib, "imm32.lib")
+  #pragma comment(lib, "comctl32.lib")
 
   #if JUCE_OPENGL
    #pragma comment(lib, "OpenGL32.Lib")
@@ -250,6 +252,10 @@ namespace juce
  #include "native/juce_MultiTouchMapper.h"
 #endif
 
+#if JUCE_ANDROID || JUCE_WINDOWS
+ #include "native/accessibility/juce_AccessibilityTextHelpers.h"
+#endif
+
 namespace juce
 {
 
@@ -270,7 +276,10 @@ bool getComponentAsyncLayerBackedViewDisabled (juce::Component& comp)
 } // namespace juce
 
 #if JUCE_MAC || JUCE_IOS
+ #include "native/accessibility/juce_mac_AccessibilitySharedCode.mm"
+
  #if JUCE_IOS
+  #include "native/accessibility/juce_ios_Accessibility.mm"
   #include "native/juce_ios_UIViewComponentPeer.mm"
   #include "native/juce_ios_Windowing.mm"
   #include "native/juce_ios_FileChooser.mm"
@@ -328,6 +337,7 @@ bool getComponentAsyncLayerBackedViewDisabled (juce::Component& comp)
  #include "native/juce_linux_FileChooser.cpp"
 
 #elif JUCE_ANDROID
+ #include "native/accessibility/juce_android_Accessibility.cpp"
  #include "native/juce_android_Windowing.cpp"
  #include "native/juce_common_MimeTypes.cpp"
  #include "native/juce_android_FileChooser.cpp"
@@ -338,16 +348,22 @@ bool getComponentAsyncLayerBackedViewDisabled (juce::Component& comp)
 
 #endif
 
-#if ! JUCE_NATIVE_ACCESSIBILITY_INCLUDED
 namespace juce
 {
+   #if ! JUCE_NATIVE_ACCESSIBILITY_INCLUDED
     class AccessibilityHandler::AccessibilityNativeImpl { public: AccessibilityNativeImpl (AccessibilityHandler&) {} };
     void AccessibilityHandler::notifyAccessibilityEvent (AccessibilityEvent) const {}
     void AccessibilityHandler::postAnnouncement (const String&, AnnouncementPriority) {}
     AccessibilityNativeHandle* AccessibilityHandler::getNativeImplementation() const { return nullptr; }
-    AccessibilityHandler::AccessibilityNativeImpl* AccessibilityHandler::createNativeImpl (AccessibilityHandler&) { return nullptr; }
-    void AccessibilityHandler::DestroyNativeImpl::operator() (AccessibilityHandler::AccessibilityNativeImpl*) const noexcept {}
-    bool areAnyAccessibilityClientsActive() { return false; }
     void notifyAccessibilityEventInternal (const AccessibilityHandler&, InternalAccessibilityEvent) {}
+    std::unique_ptr<AccessibilityHandler::AccessibilityNativeImpl> AccessibilityHandler::createNativeImpl (AccessibilityHandler&)
+    {
+        return nullptr;
+    }
+   #else
+    std::unique_ptr<AccessibilityHandler::AccessibilityNativeImpl> AccessibilityHandler::createNativeImpl (AccessibilityHandler& handler)
+    {
+        return std::make_unique<AccessibilityNativeImpl> (handler);
+    }
+   #endif
 }
-#endif

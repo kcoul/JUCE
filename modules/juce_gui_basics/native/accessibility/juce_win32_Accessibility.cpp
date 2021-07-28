@@ -193,7 +193,7 @@ void AccessibilityHandler::notifyAccessibilityEvent (AccessibilityEvent eventTyp
         sendAccessibilityPropertyChangedEvent (*this, UIA_NamePropertyId, newValue);
     }
 
-    auto event = [eventType] () -> EVENTID
+    auto event = [eventType]() -> EVENTID
     {
         switch (eventType)
         {
@@ -218,8 +218,7 @@ struct SpVoiceWrapper  : public DeletedAtShutdown
     {
         auto hr = voice.CoCreateInstance (CLSID_SpVoice);
 
-        jassert (SUCCEEDED (hr));
-        ignoreUnused (hr);
+        jassertquiet (SUCCEEDED (hr));
     }
 
     ~SpVoiceWrapper() override
@@ -258,16 +257,6 @@ void AccessibilityHandler::postAnnouncement (const String& announcementString, A
         sharedVoice->voice->SetPriority (voicePriority);
         sharedVoice->voice->Speak (announcementString.toWideCharPointer(), SPF_ASYNC, nullptr);
     }
-}
-
-AccessibilityHandler::AccessibilityNativeImpl* AccessibilityHandler::createNativeImpl (AccessibilityHandler& handler)
-{
-    return new AccessibilityHandler::AccessibilityNativeImpl (handler);
-}
-
-void AccessibilityHandler::DestroyNativeImpl::operator() (AccessibilityHandler::AccessibilityNativeImpl* impl) const noexcept
-{
-    delete impl;
 }
 
 //==============================================================================

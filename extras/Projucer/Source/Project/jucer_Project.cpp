@@ -407,7 +407,7 @@ void Project::removeDefunctExporters()
             if (ProjucerApplication::getApp().isRunningCommandLine)
                 std::cout <<  "WARNING! The " + oldExporters[key]  + " Exporter is deprecated. The exporter will be removed from this project." << std::endl;
             else
-                AlertWindow::showMessageBoxAsync (AlertWindow::WarningIcon,
+                AlertWindow::showMessageBoxAsync (MessageBoxIconType::WarningIcon,
                                                   TRANS (oldExporters[key]),
                                                   TRANS ("The " + oldExporters[key]  + " Exporter is deprecated. The exporter will be removed from this project."));
 
@@ -671,8 +671,7 @@ Result Project::loadDocument (const File& file)
 
 Result Project::saveDocument (const File& file)
 {
-    jassert (file == getFile());
-    ignoreUnused (file);
+    jassertquiet (file == getFile());
 
     auto sharedResult = Result::ok();
 
@@ -686,8 +685,7 @@ Result Project::saveDocument (const File& file)
 
 void Project::saveDocumentAsync (const File& file, std::function<void (Result)> afterSave)
 {
-    jassert (file == getFile());
-    ignoreUnused (file);
+    jassertquiet (file == getFile());
 
     saveProject (Async::yes, nullptr, std::move (afterSave));
 }
@@ -1548,6 +1546,11 @@ void Project::Item::setID (const String& newID)   { state.setProperty (Ids::ID, 
 
 std::unique_ptr<Drawable> Project::Item::loadAsImageFile() const
 {
+    const MessageManagerLock mml (ThreadPoolJob::getCurrentThreadPoolJob());
+
+    if (! mml.lockWasGained())
+        return nullptr;
+
     if (isValid())
         return Drawable::createFromImageFile (getFile());
 
@@ -1962,9 +1965,6 @@ Icon Project::Item::getIcon (bool isOpen) const
 
         return { icons.file, Colours::transparentBlack };
     }
-
-    if (isMainGroup())
-        return { icons.juceLogo, Colours::orange };
 
     return { isOpen ? icons.openFolder : icons.closedFolder, Colours::transparentBlack };
 }
