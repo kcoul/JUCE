@@ -56,7 +56,7 @@ void LatestVersionCheckerAndUpdater::run()
     if (info == nullptr)
     {
         if (! backgroundCheck)
-            AlertWindow::showMessageBoxAsync (AlertWindow::WarningIcon,
+            AlertWindow::showMessageBoxAsync (MessageBoxIconType::WarningIcon,
                                               "Update Server Communication Error",
                                               "Failed to communicate with the JUCE update server.\n"
                                               "Please try again in a few minutes.\n\n"
@@ -68,7 +68,7 @@ void LatestVersionCheckerAndUpdater::run()
     if (! info->isNewerVersionThanCurrent())
     {
         if (! backgroundCheck)
-            AlertWindow::showMessageBoxAsync (AlertWindow::InfoIcon,
+            AlertWindow::showMessageBoxAsync (MessageBoxIconType::InfoIcon,
                                               "No New Version Available",
                                               "Your JUCE version is up to date.");
         return;
@@ -109,7 +109,7 @@ void LatestVersionCheckerAndUpdater::run()
     }
 
     if (! backgroundCheck)
-        AlertWindow::showMessageBoxAsync (AlertWindow::WarningIcon,
+        AlertWindow::showMessageBoxAsync (MessageBoxIconType::WarningIcon,
                                           "Failed to find any new downloads",
                                           "Please try again in a few minutes.");
 }
@@ -240,10 +240,9 @@ void LatestVersionCheckerAndUpdater::askUserForLocationToDownload (const Version
 {
     chooser = std::make_unique<FileChooser> ("Please select the location into which you would like to install the new version",
                                              File { getAppSettings().getStoredPath (Ids::jucePath, TargetOS::getThisOS()).get() });
-    auto flags = FileBrowserComponent::openMode
-               | FileBrowserComponent::canSelectDirectories;
 
-    chooser->launchAsync (flags, [this, asset] (const FileChooser& fc)
+    chooser->launchAsync (FileBrowserComponent::openMode | FileBrowserComponent::canSelectDirectories,
+                          [weakThis = WeakReference<LatestVersionCheckerAndUpdater> { this }, asset] (const FileChooser& fc)
     {
         auto targetFolder = fc.getResult();
 
@@ -264,26 +263,25 @@ void LatestVersionCheckerAndUpdater::askUserForLocationToDownload (const Version
 
         auto targetFolderPath = targetFolder.getFullPathName();
 
-        WeakReference<LatestVersionCheckerAndUpdater> parent { this };
-        auto callback = ModalCallbackFunction::create ([parent, asset, targetFolder] (int result)
+        const auto onResult = [weakThis, asset, targetFolder] (int result)
         {
-            if (parent == nullptr || result == 0)
+            if (weakThis == nullptr || result == 0)
                 return;
 
-            parent->downloadAndInstall (asset, targetFolder);
-        });
+            weakThis->downloadAndInstall (asset, targetFolder);
+        };
 
         if (willOverwriteJuceFolder)
         {
             if (targetFolder.getChildFile (".git").isDirectory())
             {
-                AlertWindow::showMessageBoxAsync (AlertWindow::WarningIcon, "Downloading New JUCE Version",
+                AlertWindow::showMessageBoxAsync (MessageBoxIconType::WarningIcon, "Downloading New JUCE Version",
                                                   targetFolderPath + "\n\nis a GIT repository!\n\nYou should use a \"git pull\" to update it to the latest version.");
 
                 return;
             }
 
-            AlertWindow::showOkCancelBox (AlertWindow::WarningIcon,
+            AlertWindow::showOkCancelBox (MessageBoxIconType::WarningIcon,
                                           "Overwrite Existing JUCE Folder?",
                                           "Do you want to replace the folder\n\n" + targetFolderPath + "\n\nwith the latest version from juce.com?\n\n"
                                               "This will move the existing folder to " + targetFolderPath + "_old.\n\n"
@@ -291,23 +289,24 @@ void LatestVersionCheckerAndUpdater::askUserForLocationToDownload (const Version
                                           {},
                                           {},
                                           nullptr,
-                                          callback);
+                                          ModalCallbackFunction::create (onResult));
             return;
         }
 
         if (targetFolder.exists())
         {
-            AlertWindow::showOkCancelBox (AlertWindow::WarningIcon,
+            AlertWindow::showOkCancelBox (MessageBoxIconType::WarningIcon,
                                           "Existing File Or Directory",
                                           "Do you want to move\n\n" + targetFolderPath + "\n\nto\n\n" + targetFolderPath + "_old?",
                                           {},
                                           {},
                                           nullptr,
-                                          callback);
+                                          ModalCallbackFunction::create (onResult));
             return;
         }
 
-        downloadAndInstall (asset, targetFolder);
+        if (weakThis != nullptr)
+            weakThis->downloadAndInstall (asset, targetFolder);
     });
 }
 
@@ -389,7 +388,7 @@ private:
             result = install (zipData);
 
         if (result.failed())
-            MessageManager::callAsync ([result] { AlertWindow::showMessageBoxAsync (AlertWindow::WarningIcon,
+            MessageManager::callAsync ([result] { AlertWindow::showMessageBoxAsync (MessageBoxIconType::WarningIcon,
                                                                                     "Installation Failed",
                                                                                     result.getErrorMessage()); });
         else

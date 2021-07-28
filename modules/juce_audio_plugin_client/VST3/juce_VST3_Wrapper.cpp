@@ -261,20 +261,14 @@ private:
 #endif
 
 //==============================================================================
-class ScopedThreadLocalBooleanSetter
+class InParameterChangedCallbackSetter
 {
 public:
-    explicit ScopedThreadLocalBooleanSetter (ThreadLocalValue<bool>& ref)
-        : toSet (ref)
-    {
-        jassert (! toSet.get());
-        toSet = true;
-    }
-
-    ~ScopedThreadLocalBooleanSetter() noexcept { toSet = false; }
+    explicit InParameterChangedCallbackSetter (bool& ref)
+        : inner ([&]() -> auto& { jassert (! ref); return ref; }(), true, false) {}
 
 private:
-    ThreadLocalValue<bool>& toSet;
+    ScopedValueSetter<bool> inner;
 };
 
 template <typename Member>
@@ -636,7 +630,7 @@ private:
 
 class JuceVST3Component;
 
-static ThreadLocalValue<bool> inParameterChangedCallback;
+static thread_local bool inParameterChangedCallback = false;
 
 //==============================================================================
 class JuceVST3EditController : public Vst::EditController,
@@ -766,7 +760,7 @@ public:
 
                     param.setValue (value);
 
-                    ScopedThreadLocalBooleanSetter scope { inParameterChangedCallback };
+                    const InParameterChangedCallbackSetter scopedSetter { inParameterChangedCallback };
                     param.sendValueChangedMessageToListeners (value);
                 }
 
@@ -1170,7 +1164,9 @@ public:
             const auto mayCreateEditor = pluginInstance->hasEditor()
                                       && name != nullptr
                                       && std::strcmp (name, Vst::ViewType::kEditor) == 0
-                                      && (pluginInstance->getActiveEditor() == nullptr || getHostType().isAdobeAudition());
+                                      && (pluginInstance->getActiveEditor() == nullptr
+                                          || getHostType().isAdobeAudition()
+                                          || getHostType().isPremiere());
 
             if (mayCreateEditor)
                 return new JuceVST3Editor (*this, *audioProcessor);
@@ -1194,7 +1190,7 @@ public:
 
     void paramChanged (Steinberg::int32 parameterIndex, Vst::ParamID vstParamId, double newValue)
     {
-        if (inParameterChangedCallback.get())
+        if (inParameterChangedCallback)
             return;
 
         if (MessageManager::getInstance()->isThisTheMessageThread())
@@ -2357,7 +2353,7 @@ public:
             auto floatValue = (shouldBeBypassed ? 1.0f : 0.0f);
             bypassParam->setValue (floatValue);
 
-            ScopedThreadLocalBooleanSetter scope { inParameterChangedCallback };
+            const InParameterChangedCallbackSetter scopedSetter { inParameterChangedCallback };
             bypassParam->sendValueChangedMessageToListeners (floatValue);
         }
     }
@@ -2829,11 +2825,29 @@ public:
                 info.channelCount = bus->getLastEnabledLayout().size();
                 toString128 (info.name, bus->getName());
 
-               #if JucePlugin_IsSynth
-                info.busType = (dir == Vst::kInput && index > 0 ? Vst::kAux : Vst::kMain);
-               #else
-                info.busType = (index == 0 ? Vst::kMain : Vst::kAux);
-               #endif
+                info.busType = [&]
+                {
+                    const auto isFirstBus = (index == 0);
+
+                    if (dir == Vst::kInput)
+                    {
+                        if (isFirstBus)
+                        {
+                            if (auto* extensions = dynamic_cast<VST3ClientExtensions*> (pluginInstance))
+                                return extensions->getPluginHasMainInput() ? Vst::kMain : Vst::kAux;
+
+                            return Vst::kMain;
+                        }
+
+                        return Vst::kAux;
+                    }
+
+                   #if JucePlugin_IsSynth
+                    return Vst::kMain;
+                   #else
+                    return isFirstBus ? Vst::kMain : Vst::kAux;
+                   #endif
+                }();
 
                #ifdef JucePlugin_PreferredChannelConfigurations
                 info.flags = Vst::BusInfo::kDefaultActive;
@@ -3087,7 +3101,7 @@ public:
                         {
                             param->setValue (floatValue);
 
-                            ScopedThreadLocalBooleanSetter scope { inParameterChangedCallback };
+                            const InParameterChangedCallbackSetter scopedSetter { inParameterChangedCallback };
                             param->sendValueChangedMessageToListeners (floatValue);
                         }
                     }

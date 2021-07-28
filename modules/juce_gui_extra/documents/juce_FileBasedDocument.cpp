@@ -339,7 +339,7 @@ private:
             auto result = Result::fail (TRANS ("The file doesn't exist"));
 
             if (showMessageOnFailure)
-                AlertWindow::showMessageBoxAsync (AlertWindow::WarningIcon,
+                AlertWindow::showMessageBoxAsync (MessageBoxIconType::WarningIcon,
                                                   TRANS ("Failed to open file..."),
                                                   TRANS ("There was an error while trying to load the file: FLNM")
                                                           .replace ("FLNM", "\n" + newFile.getFullPathName())
@@ -402,7 +402,7 @@ private:
             return;
         }
 
-        auto afterAsking = [doSave = std::move (doSave),
+        auto afterAsking = [doSave = std::forward<DoSave> (doSave),
                             completed = std::move (completed)] (SafeParentPointer ptr,
                                                                 int alertResult)
         {
@@ -448,7 +448,7 @@ private:
                                                                            callback (parent, alertResult);
                                                                    });
 
-        return AlertWindow::showYesNoCancelBox (AlertWindow::QuestionIcon,
+        return AlertWindow::showYesNoCancelBox (MessageBoxIconType::QuestionIcon,
                                                 TRANS ("Closing document..."),
                                                 TRANS ("Do you want to save the changes to \"DCNM\"?")
                                                     .replace ("DCNM", document.getDocumentTitle()),
@@ -510,7 +510,7 @@ private:
                 MouseCursor::hideWaitCursor();
 
             if (showMessageOnFailure)
-                AlertWindow::showMessageBoxAsync (AlertWindow::WarningIcon,
+                AlertWindow::showMessageBoxAsync (MessageBoxIconType::WarningIcon,
                                                   TRANS ("Error writing to file..."),
                                                   TRANS ("An error occurred while trying to save \"DCNM\" to the file: FLNM")
                                                           .replace ("DCNM", parent->document.getDocumentTitle())
@@ -562,7 +562,7 @@ private:
                                    newFile,
                                    showMessageOnFailure,
                                    showWaitCursor,
-                                   doSaveDocument = std::move (doSaveDocument)]
+                                   doSaveDocument = std::forward<DoSaveDocument> (doSaveDocument)]
         {
             if (! parent.shouldExitAsyncCallback())
                 parent->saveInternal (parent,
@@ -682,7 +682,7 @@ private:
                                                                            callback (parent, r == 1);
                                                                    });
 
-        return AlertWindow::showOkCancelBox (AlertWindow::WarningIcon,
+        return AlertWindow::showOkCancelBox (MessageBoxIconType::WarningIcon,
                                              TRANS ("File already exists"),
                                              TRANS ("There's already a file called: FLNM")
                                                      .replace ("FLNM", newFile.getFullPathName())
@@ -723,8 +723,8 @@ private:
     {
         doSelectFilename (parent,
                           warnAboutOverwritingExistingFiles,
-                          [doSaveAs = std::move (doSaveAs),
-                           doAskToOverwriteFile = std::move (doAskToOverwriteFile),
+                          [doSaveAs = std::forward<DoSaveAs> (doSaveAs),
+                           doAskToOverwriteFile = std::forward<DoAskToOverwriteFile> (doAskToOverwriteFile),
                            callback = std::move (callback)] (SafeParentPointer ptr, File chosen)
         {
             if (ptr.shouldExitAsyncCallback())

@@ -32,7 +32,7 @@
 
  dependencies:     juce_core, juce_data_structures, juce_events, juce_graphics,
                    juce_gui_basics
- exporters:        xcode_mac, vs2019
+ exporters:        xcode_mac, vs2019, androidstudio, xcode_iphone
 
  moduleFlags:      JUCE_STRICT_REFCOUNTEDPOINTER=1
 
@@ -193,7 +193,7 @@ private:
             addAndMakeVisible (textButton);
 
             shapeButton.setShape (getJUCELogoPath(), false, true, false);
-            shapeButton.onClick = [] { AlertWindow::showMessageBoxAsync (AlertWindow::InfoIcon, "Alert", "This is an AlertWindow"); };
+            shapeButton.onClick = [] { AlertWindow::showMessageBoxAsync (MessageBoxIconType::InfoIcon, "Alert", "This is an AlertWindow"); };
             addAndMakeVisible (shapeButton);
         }
 

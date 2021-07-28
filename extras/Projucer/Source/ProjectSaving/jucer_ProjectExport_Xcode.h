@@ -723,7 +723,7 @@ public:
                                            "Since JUCE 4.2, this is instead done using \"AU/VST/VST2/AAX/RTAS Binary Location\" in the Xcode (OS X) configuration settings.\n\n"
                                            "Click 'Update' to remove the script (otherwise your plug-in may not compile correctly).";
 
-            if (AlertWindow::showOkCancelBox (AlertWindow::WarningIcon,
+            if (AlertWindow::showOkCancelBox (MessageBoxIconType::WarningIcon,
                                               "Project settings: " + project.getDocumentTitle(),
                                               alertWindowText, "Update", "Cancel", nullptr, nullptr))
                 postbuildCommandValue.resetToDefault();
@@ -953,21 +953,22 @@ protected:
 
         void updateOldSDKDefaults()
         {
-            if (config[Ids::iosCompatibility].toString() == "default")  iosDeploymentTarget.resetToDefault();
-            if (macOSArchitecture.get() == "default")                   macOSArchitecture.resetToDefault();
+            if (macOSArchitecture.get() == "default")
+                macOSArchitecture.resetToDefault();
 
-            const auto updateSDKString = [this] (const Identifier& propertyName, ValueWithDefault& value)
+            const auto updateSDKString = [this] (const Identifier& propertyName, ValueWithDefault& value, const String& suffix)
             {
                 auto sdkString = config[propertyName].toString();
 
                 if (sdkString == "default")
                     value.resetToDefault();
-                else if (sdkString.isNotEmpty() && sdkString.contains (" SDK"))
-                    value = sdkString.upToFirstOccurrenceOf (" SDK", false, false);
+                else if (sdkString.isNotEmpty() && sdkString.endsWith (suffix))
+                    value = sdkString.upToLastOccurrenceOf (suffix, false, false);
             };
 
-            updateSDKString (Ids::osxSDK, macOSBaseSDK);
-            updateSDKString (Ids::osxCompatibility, macOSDeploymentTarget);
+            updateSDKString (Ids::osxSDK, macOSBaseSDK, " SDK");
+            updateSDKString (Ids::osxCompatibility, macOSDeploymentTarget, " SDK");
+            updateSDKString (Ids::iosCompatibility, iosDeploymentTarget, {});
         }
     };
 
@@ -1813,7 +1814,6 @@ public:
             options.pluginManufacturerCode           = owner.project.getPluginManufacturerCodeString();
             options.IAATypeCode                      = owner.project.getIAATypeCode();
             options.pluginCode                       = owner.project.getPluginCodeString();
-            options.versionAsHex                     = owner.project.getVersionAsHexInteger();
             options.iPhoneScreenOrientations         = owner.getiPhoneScreenOrientations();
             options.iPadScreenOrientations           = owner.getiPadScreenOrientations();
 
@@ -3393,7 +3393,7 @@ private:
 
     static String indentList (StringArray list, char openBracket, char closeBracket, const String& separator, int extraTabs, bool shouldSort)
     {
-        auto content = [extraTabs, shouldSort, &list, &separator] () -> String
+        auto content = [extraTabs, shouldSort, &list, &separator]() -> String
         {
             if (list.isEmpty())
                 return "";
