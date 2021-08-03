@@ -57,6 +57,7 @@ public:
           customPListValue                             (settings, Ids::customPList,                             getUndoManager()),
           pListPrefixHeaderValue                       (settings, Ids::pListPrefixHeader,                       getUndoManager()),
           pListPreprocessValue                         (settings, Ids::pListPreprocess,                         getUndoManager()),
+          subprojectTargetFilter                       (settings, Ids::xcodeSubprojectTargetFilter,             getUndoManager()),
           subprojectsValue                             (settings, Ids::xcodeSubprojects,                        getUndoManager()),
           validArchsValue                              (settings, Ids::xcodeValidArchs,                         getUndoManager(), getAllArchs(), ","),
           extraFrameworksValue                         (settings, Ids::extraFrameworks,                         getUndoManager()),
@@ -137,6 +138,7 @@ public:
     String getPListPrefixHeaderString() const               { return pListPrefixHeaderValue.get(); }
     bool isPListPreprocessEnabled() const                   { return pListPreprocessValue.get(); }
 
+    String getSubprojectFilterString() const                { return subprojectTargetFilter.get(); }
     String getSubprojectsString() const                     { return subprojectsValue.get(); }
 
     String getExtraFrameworksString() const                 { return extraFrameworksValue.get(); }
@@ -612,7 +614,8 @@ public:
                    "Paths to frameworks to be embedded with the app (one per line). "
                    "If you are adding a framework here then you do not need to specify it in Extra Custom Frameworks too. "
                    "You will probably need to add an entry to the Framework Search Paths for each unique directory.");
-
+        props.add (new TextPropertyComponent (subprojectTargetFilter, "Xcode Subproject Target Filter", 8192, true),
+                   "Names of targets in subprojects that should be filtered from inclusion in the JUCE project.");
         props.add (new TextPropertyComponent (subprojectsValue, "Xcode Subprojects", 8192, true),
                    "Paths to Xcode projects that should be added to the build (one per line). "
                    "These can be absolute or relative to the build directory. "
@@ -2623,6 +2626,8 @@ private:
 
     void addSubprojects() const
     {
+        auto subprojectFilterLines = StringArray::fromLines (getSubprojectFilterString());
+        subprojectFilterLines.removeEmptyStrings (true);
         auto subprojectLines = StringArray::fromLines (getSubprojectsString());
         subprojectLines.removeEmptyStrings (true);
 
@@ -2653,7 +2658,7 @@ private:
             if (! subprojectFile.isDirectory())
                 continue;
 
-            auto availableBuildProducts = XcodeProjectParser::parseBuildProducts (subprojectFile);
+            auto availableBuildProducts = XcodeProjectParser::parseBuildProducts (subprojectFile, subprojectFilterLines);
 
             if (! subprojectInfo.buildProducts.isEmpty())
             {
@@ -3517,7 +3522,7 @@ private:
 
     ValueWithDefault applicationCategoryValue,
                      customPListValue, pListPrefixHeaderValue, pListPreprocessValue,
-                     subprojectsValue,
+                     subprojectTargetFilter, subprojectsValue,
                      validArchsValue,
                      extraFrameworksValue, frameworkSearchPathsValue, extraCustomFrameworksValue, embeddedFrameworksValue,
                      postbuildCommandValue, prebuildCommandValue,

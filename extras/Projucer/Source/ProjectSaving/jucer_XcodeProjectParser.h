@@ -125,7 +125,7 @@ public:
         String path;
     };
 
-    static std::vector<BuildProduct> parseBuildProducts (const File& projectFile)
+    static std::vector<BuildProduct> parseBuildProducts (const File& projectFile, StringArray& targetFilterList)
     {
         auto objects = parseObjects (projectFile);
 
@@ -152,7 +152,7 @@ public:
 
             auto name = parseObjectItemValue (objects->getReference (targetRef), "name");
 
-            if (name.empty())
+            if (name.empty() || targetFilterList.contains(name))
                 continue;
 
             auto productRef = parseObjectItemValue (objects->getReference (targetRef), "productReference");
