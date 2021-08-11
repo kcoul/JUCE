@@ -98,7 +98,7 @@ public:
                      androidBluetoothNeeded, androidExternalReadPermission, androidExternalWritePermission,
                      androidInAppBillingPermission, androidVibratePermission, androidOtherPermissions, androidPushNotifications,
                      androidEnableRemoteNotifications, androidRemoteNotificationsConfigFile, androidEnableContentSharing, androidKeyStore,
-                     androidKeyAlias, androidKeyAliasPass, gradleVersion, gradleToolchain, androidPluginVersion;
+                     androidKeyStorePass, androidKeyAlias, androidKeyAliasPass, gradleVersion, gradleToolchain, androidPluginVersion,
                      androidUseSharedSTL, androidCustomCMakeListsAdditions,
                      androidCustomJuceAppImports, androidCustomJuceAppOnCreateAdditions;
 
