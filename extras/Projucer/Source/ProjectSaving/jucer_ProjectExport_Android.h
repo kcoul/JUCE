@@ -93,7 +93,7 @@ public:
     ValueWithDefault androidJavaLibs, androidAdditionalJavaFolders, androidAdditionalResourceFolders, androidProjectRepositories,
                      androidRepositories, androidDependencies, androidCustomAppBuildGradleContent, androidScreenOrientation,
                      androidCustomActivityClass, androidCustomApplicationClass, androidManifestCustomXmlElements,
-                     androidGradleSettingsContent, androidVersionCode, androidMinimumSDK, androidTargetSDK, androidTheme,
+                     androidGradleSettingsContent, androidGradlePropertiesContent, androidVersionCode, androidMinimumSDK, androidTargetSDK, androidTheme,
                      androidExtraAssetsFolder, androidOboeRepositoryPath, androidInternetNeeded, androidMicNeeded, androidCameraNeeded,
                      androidBluetoothNeeded, androidExternalReadPermission, androidExternalWritePermission,
                      androidInAppBillingPermission, androidVibratePermission, androidOtherPermissions, androidPushNotifications,
@@ -117,6 +117,7 @@ public:
           androidCustomApplicationClass        (settings, Ids::androidCustomApplicationClass,        getUndoManager(), getDefaultApplicationClass()),
           androidManifestCustomXmlElements     (settings, Ids::androidManifestCustomXmlElements,     getUndoManager()),
           androidGradleSettingsContent         (settings, Ids::androidGradleSettingsContent,         getUndoManager()),
+          androidGradlePropertiesContent       (settings, Ids::androidGradlePropertiesContent,       getUndoManager()),
           androidVersionCode                   (settings, Ids::androidVersionCode,                   getUndoManager(), "1"),
           androidMinimumSDK                    (settings, Ids::androidMinimumSDK,                    getUndoManager(), "16"),
           androidTargetSDK                     (settings, Ids::androidTargetSDK,                     getUndoManager(), "29"),
@@ -199,6 +200,7 @@ public:
         copyExtraResourceFiles();
 
         writeFile (targetFolder, "settings.gradle",                          getGradleSettingsFileContent());
+        writeFile (targetFolder, "gradle.properties",                        getGradlePropertiesFileContent());
         writeFile (targetFolder, "build.gradle",                             getProjectBuildGradleFileContent());
         writeFile (appFolder,    "build.gradle",                             getAppBuildGradleFileContent (modules));
         writeFile (targetFolder, "local.properties",                         getLocalPropertiesFileContent());
@@ -598,6 +600,19 @@ private:
         mo << (isLibrary() ? "include ':lib'" : "include ':app'");
 
         auto extraContent = androidGradleSettingsContent.get().toString();
+
+        if (extraContent.isNotEmpty())
+            mo << newLine << extraContent << newLine;
+
+        return mo.toString();
+    }
+    
+    String getGradlePropertiesFileContent() const
+    {
+        MemoryOutputStream mo;
+        mo.setNewLineString (getNewLineString());
+
+        auto extraContent = androidGradlePropertiesContent.get().toString();
 
         if (extraContent.isNotEmpty())
             mo << newLine << extraContent << newLine;
@@ -1058,6 +1073,9 @@ private:
 
         props.add (new TextPropertyComponent (androidGradleSettingsContent, "Custom gradle.settings content", 32768, true),
                    "You can customize the content of settings.gradle here");
+        
+        props.add (new TextPropertyComponent (androidGradlePropertiesContent, "Custom gradle.properties content", 32768, true),
+                   "You can customize the content of gradle.properties here");
 
         props.add (new ChoicePropertyComponent (androidScreenOrientation, "Screen Orientation",
                                                 { "Portrait and Landscape", "Portrait", "Landscape" },

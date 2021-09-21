@@ -226,6 +226,7 @@ namespace Ids
     DECLARE_ID (androidArchitectures);
     DECLARE_ID (androidManifestCustomXmlElements);
     DECLARE_ID (androidGradleSettingsContent);
+    DECLARE_ID (androidGradlePropertiesContent);
     DECLARE_ID (androidCustomStringXmlElements);
     DECLARE_ID (androidBluetoothNeeded);
     DECLARE_ID (androidExternalReadNeeded);
