@@ -132,18 +132,9 @@ MainWindow::MainWindow()
                       DocumentWindow::allButtons,
                       false)
 {
+    setResizable(true, false);
     setUsingNativeTitleBar (true);
-    
-#if JUCE_MAC
-    setResizable(true, false);
-    setResizeLimits (600, 500, 32000, 32000);
-#elif JUCE_WINDOWS 
-    setResizable(true, false);
     setResizeLimits(600, 500, 32000, 32000);
-#else
-    setResizable(false, false);
-    setResizeLimits(600, 480, 600, 480);
-#endif
 
    #if ! JUCE_MAC
     setMenuBar (ProjucerApplication::getApp().getMenuModel());
@@ -177,13 +168,7 @@ MainWindow::MainWindow()
 
     projectNameValue.addListener (this);
 
-#if JUCE_MAC
     centreWithSize(800, 600);
-#elif JUCE_WINDOWS 
-    centreWithSize(800, 600);
-#else
-    centreWithSize(600, 480);
-#endif
 }
 
 MainWindow::~MainWindow()
@@ -229,20 +214,7 @@ void MainWindow::makeVisible()
 {
     setVisible (true);
     addToDesktop();
-#if JUCE_MAC
     restoreWindowPosition();
-#elif JUCE_WINDOWS
-    restoreWindowPosition();
-#else
-    if (auto* top = getTopLevelComponent())
-    {
-        auto  area = getParentMonitorArea();
-        auto  x = 50;
-        auto  y = 50;
-
-        top->setTopLeftPosition(area.getX() + x, area.getY() + y);
-    }
-#endif
     updateTitleBarIcon();
     getContentComponent()->grabKeyboardFocus();
 }
