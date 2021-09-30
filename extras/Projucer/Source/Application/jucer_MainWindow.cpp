@@ -133,8 +133,17 @@ MainWindow::MainWindow()
                       false)
 {
     setUsingNativeTitleBar (true);
-    setResizable (true, false);
+    
+#if JUCE_MAC
+    setResizable(true, false);
     setResizeLimits (600, 500, 32000, 32000);
+#elif JUCE_WINDOWS 
+    setResizable(true, false);
+    setResizeLimits(600, 500, 32000, 32000);
+#else
+    setResizable(false, false);
+    setResizeLimits(800, 480, 800, 480);
+#endif
 
    #if ! JUCE_MAC
     setMenuBar (ProjucerApplication::getApp().getMenuModel());
@@ -168,7 +177,13 @@ MainWindow::MainWindow()
 
     projectNameValue.addListener (this);
 
-    centreWithSize (800, 600);
+#if JUCE_MAC
+    centreWithSize(800, 600);
+#elif JUCE_WINDOWS 
+    centreWithSize(800, 600);
+#else
+    centreWithSize(800, 480);
+#endif
 }
 
 MainWindow::~MainWindow()
