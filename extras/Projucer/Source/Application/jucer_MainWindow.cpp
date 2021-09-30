@@ -229,7 +229,20 @@ void MainWindow::makeVisible()
 {
     setVisible (true);
     addToDesktop();
+#if JUCE_MAC
     restoreWindowPosition();
+#elif JUCE_WINDOWS
+    restoreWindowPosition();
+#else
+    if (auto* top = getTopLevelComponent())
+    {
+        auto  area = getParentMonitorArea();
+        auto  x = 50;
+        auto  y = 50;
+
+        top->setTopLeftPosition(area.getX() + x, area.getY() + y);
+    }
+#endif
     updateTitleBarIcon();
     getContentComponent()->grabKeyboardFocus();
 }
