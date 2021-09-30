@@ -142,7 +142,7 @@ MainWindow::MainWindow()
     setResizeLimits(600, 500, 32000, 32000);
 #else
     setResizable(false, false);
-    setResizeLimits(800, 480, 800, 480);
+    setResizeLimits(600, 480, 600, 480);
 #endif
 
    #if ! JUCE_MAC
@@ -182,7 +182,7 @@ MainWindow::MainWindow()
 #elif JUCE_WINDOWS 
     centreWithSize(800, 600);
 #else
-    centreWithSize(800, 480);
+    centreWithSize(600, 480);
 #endif
 }
 
