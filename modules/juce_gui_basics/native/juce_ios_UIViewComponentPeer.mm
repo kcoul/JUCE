@@ -453,7 +453,9 @@ MultiTouchMapper<UITouch*> UIViewComponentPeer::currentTouches;
         auto panRecognizer = [[[UIPanGestureRecognizer alloc] initWithTarget: self action: @selector (onScroll:)] autorelease];
         [panRecognizer setCancelsTouchesInView: NO];
         [panRecognizer setRequiresExclusiveTouchType: YES];
+    #if __IPHONE_OS_VERSION_MAX_ALLOWED >= 140000
         [panRecognizer setAllowedScrollTypesMask: UIScrollTypeMaskAll];
+    #endif
         [panRecognizer setMaximumNumberOfTouches: 0];
         [self addGestureRecognizer: panRecognizer];
     }
