@@ -363,7 +363,7 @@ void Displays::updateToLogical()
     for (auto& node : displayNodes)
     {
         // All of the nodes should have a parent
-        jassert (node.parent != nullptr);
+        //jassert (node.parent != nullptr);
 
         auto relativeUserArea = (node.display->userArea.toDouble() - node.display->totalArea.toDouble().getTopLeft()) / node.display->scale;
 
