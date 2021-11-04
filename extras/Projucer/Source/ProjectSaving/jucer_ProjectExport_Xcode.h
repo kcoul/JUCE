@@ -63,6 +63,8 @@ public:
           extraFrameworksValue                         (settings, Ids::extraFrameworks,                         getUndoManager()),
           frameworkSearchPathsValue                    (settings, Ids::frameworkSearchPaths,                    getUndoManager()),
           extraCustomFrameworksValue                   (settings, Ids::extraCustomFrameworks,                   getUndoManager()),
+          embeddedFrameworkCustomFlagsValue            (settings, Ids::embeddedFrameworkCustomFlags,
+              getUndoManager()),
           embeddedFrameworksValue                      (settings, Ids::embeddedFrameworks,                      getUndoManager()),
           postbuildCommandValue                        (settings, Ids::postbuildCommand,                        getUndoManager()),
           prebuildCommandValue                         (settings, Ids::prebuildCommand,                         getUndoManager()),
@@ -145,6 +147,7 @@ public:
     String getExtraFrameworksString() const                 { return extraFrameworksValue.get(); }
     String getFrameworkSearchPathsString() const            { return frameworkSearchPathsValue.get(); }
     String getExtraCustomFrameworksString() const           { return extraCustomFrameworksValue.get(); }
+    String getEmbeddedFrameworkCustomFlagsString() const    { return embeddedFrameworkCustomFlagsValue.get(); }
     String getEmbeddedFrameworksString() const              { return embeddedFrameworksValue.get(); }
 
     String getPostBuildScript() const                       { return postbuildCommandValue.get(); }
@@ -616,7 +619,9 @@ public:
         props.add (new TextPropertyComponent (extraCustomFrameworksValue, "Extra Custom Frameworks", 8192, true),
                    "Paths to custom frameworks that should be added to the build (one per line). "
                    "You will probably need to add an entry to the Framework Search Paths for each unique directory.");
-
+        props.add (new TextPropertyComponent (embeddedFrameworkCustomFlagsValue, "Embedded Framework Custom Flags", 256, true),
+                   "Flags for custom actions to be taken on certain target types for embedded frameworks. "
+                   "Currently this is used only with the SYNERVOZ_PLUGIN flag to bypass the 'copy plugin on sign' step for audio plugins only");
         props.add (new TextPropertyComponent (embeddedFrameworksValue, "Embedded Frameworks", 8192, true),
                    "Paths to frameworks to be embedded with the app (one per line). "
                    "If you are adding a framework here then you do not need to specify it in Extra Custom Frameworks too. "
@@ -3190,8 +3195,28 @@ private:
         ValueTree v (fileID + " /* " + filename + " */");
         v.setProperty ("isa", "PBXBuildFile", nullptr);
         v.setProperty ("fileRef", fileRefID, nullptr);
-        v.setProperty ("settings", "{ ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }", nullptr);
 
+//===============
+//<SYNERVOZ_EDIT>
+//===============
+        auto frameworkCustomFlags = StringArray::fromTokens (getEmbeddedFrameworkCustomFlagsString(), "\n\r", "\"'");
+        frameworkCustomFlags.trim();
+
+        bool synervozPluginFlagSet = false;
+        
+        for (auto& frameworkCustomFlag : frameworkCustomFlags)
+        {
+            if (frameworkCustomFlag == "SYNERVOZ_PLUGIN")
+                synervozPluginFlagSet = true;
+        }
+        
+        if (synervozPluginFlagSet)
+            v.setProperty ("settings", "{ ATTRIBUTES = (RemoveHeadersOnCopy, ); }", nullptr);
+        else
+            v.setProperty ("settings", "{ ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }", nullptr);
+//================
+//</SYNERVOZ_EDIT>
+//================
         addObject (v);
 
         frameworkFileIDs.add (fileRefID);
@@ -3554,7 +3579,7 @@ private:
                      customPListValue, pListPrefixHeaderValue, pListPreprocessValue,
                      subprojectTargetFilter, subprojectsValue,
                      validArchsValue,
-                     extraFrameworksValue, frameworkSearchPathsValue, extraCustomFrameworksValue, embeddedFrameworksValue,
+                     extraFrameworksValue, frameworkSearchPathsValue, extraCustomFrameworksValue, embeddedFrameworkCustomFlagsValue, embeddedFrameworksValue,
                      postbuildCommandValue, prebuildCommandValue,
                      duplicateAppExResourcesFolderValue, iosDeviceFamilyValue, iPhoneScreenOrientationValue,
                      iPadScreenOrientationValue, customXcodeResourceFoldersValue, customXcassetsFolderValue,
@@ -3568,6 +3593,6 @@ private:
                      iosContentSharingValue, iosBackgroundAudioValue, iosBackgroundBleValue, iosPushNotificationsValue, iosAppGroupsValue, iCloudPermissionsValue,
                      networkingMulticastValue, iosDevelopmentTeamIDValue, iosAppGroupsIDValue, keepCustomXcodeSchemesValue, useHeaderMapValue, customLaunchStoryboardValue,
                      exporterBundleIdentifierValue, suppressPlistResourceUsageValue, useLegacyBuildSystemValue, buildNumber;
-
+    
     JUCE_DECLARE_NON_COPYABLE (XcodeProjectExporter)
 };

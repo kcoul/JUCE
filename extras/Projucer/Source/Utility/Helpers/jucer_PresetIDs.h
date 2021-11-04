@@ -138,6 +138,7 @@ namespace Ids
     DECLARE_ID (extraFrameworks);
     DECLARE_ID (frameworkSearchPaths);
     DECLARE_ID (extraCustomFrameworks);
+    DECLARE_ID (embeddedFrameworkCustomFlags);
     DECLARE_ID (embeddedFrameworks);
     DECLARE_ID (extraDLLs);
     DECLARE_ID (winArchitecture);
