@@ -614,7 +614,7 @@ static POINT POINTFromPoint (Point<int> p) noexcept          { return { p.x, p.y
 //==============================================================================
 static const Displays::Display* getCurrentDisplayFromScaleFactor (HWND hwnd);
 
-template<typename ValueType>
+template <typename ValueType>
 static Rectangle<ValueType> convertPhysicalScreenRectangleToLogical (Rectangle<ValueType> r, HWND h) noexcept
 {
     if (isPerMonitorDPIAwareWindow (h))
@@ -623,7 +623,7 @@ static Rectangle<ValueType> convertPhysicalScreenRectangleToLogical (Rectangle<V
     return r;
 }
 
-template<typename ValueType>
+template <typename ValueType>
 static Rectangle<ValueType> convertLogicalScreenRectangleToPhysical (Rectangle<ValueType> r, HWND h) noexcept
 {
     if (isPerMonitorDPIAwareWindow (h))
@@ -715,7 +715,9 @@ static void setWindowZOrder (HWND hwnd, HWND insertAfter)
 }
 
 //==============================================================================
+#if ! JUCE_MINGW
 extern RTL_OSVERSIONINFOW getWindowsVersionInfo();
+#endif
 
 double Desktop::getDefaultMasterScale()
 {
@@ -735,6 +737,7 @@ class Desktop::NativeDarkModeChangeDetectorImpl
 public:
     NativeDarkModeChangeDetectorImpl()
     {
+       #if ! JUCE_MINGW
         const auto winVer = getWindowsVersionInfo();
 
         if (winVer.dwMajorVersion >= 10 && winVer.dwBuildNumber >= 17763)
@@ -751,6 +754,7 @@ public:
                     darkModeEnabled = shouldAppsUseDarkMode() && ! isHighContrast();
             }
         }
+       #endif
     }
 
     bool isDarkModeEnabled() const noexcept  { return darkModeEnabled; }
@@ -758,7 +762,7 @@ public:
 private:
     static bool isHighContrast()
     {
-        HIGHCONTRASTW highContrast { 0 };
+        HIGHCONTRASTW highContrast {};
 
         if (SystemParametersInfoW (SPI_GETHIGHCONTRAST, sizeof (highContrast), &highContrast, false))
             return highContrast.dwFlags & HCF_HIGHCONTRASTON;

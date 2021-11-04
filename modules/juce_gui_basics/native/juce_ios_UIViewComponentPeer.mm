@@ -23,7 +23,7 @@
   ==============================================================================
 */
 
-#if defined (__IPHONE_13_0)
+#if defined (__IPHONE_13_0) && __IPHONE_OS_VERSION_MAX_ALLOWED >= __IPHONE_13_0
  #define JUCE_HAS_IOS_POINTER_SUPPORT 1
 #else
  #define JUCE_HAS_IOS_POINTER_SUPPORT 0
@@ -38,15 +38,18 @@ static UIInterfaceOrientation getWindowOrientation()
 {
     UIApplication* sharedApplication = [UIApplication sharedApplication];
 
-   #if (defined (__IPHONE_13_0) && __IPHONE_OS_VERSION_MIN_REQUIRED >= __IPHONE_13_0)
-    for (UIScene* scene in [sharedApplication connectedScenes])
-        if ([scene isKindOfClass: [UIWindowScene class]])
-            return [(UIWindowScene*) scene interfaceOrientation];
-
-    return UIInterfaceOrientationPortrait;
-   #else
-    return [sharedApplication statusBarOrientation];
+   #if defined (__IPHONE_13_0) && __IPHONE_OS_VERSION_MAX_ALLOWED >= __IPHONE_13_0
+    if (@available (iOS 13.0, *))
+    {
+        for (UIScene* scene in [sharedApplication connectedScenes])
+            if ([scene isKindOfClass: [UIWindowScene class]])
+                return [(UIWindowScene*) scene interfaceOrientation];
+    }
    #endif
+
+    JUCE_BEGIN_IGNORE_WARNINGS_GCC_LIKE ("-Wdeprecated-declarations")
+    return [sharedApplication statusBarOrientation];
+    JUCE_END_IGNORE_WARNINGS_GCC_LIKE
 }
 
 namespace Orientations
@@ -453,7 +456,9 @@ MultiTouchMapper<UITouch*> UIViewComponentPeer::currentTouches;
         auto panRecognizer = [[[UIPanGestureRecognizer alloc] initWithTarget: self action: @selector (onScroll:)] autorelease];
         [panRecognizer setCancelsTouchesInView: NO];
         [panRecognizer setRequiresExclusiveTouchType: YES];
+    #if __IPHONE_OS_VERSION_MAX_ALLOWED >= 140000
         [panRecognizer setAllowedScrollTypesMask: UIScrollTypeMaskAll];
+    #endif
         [panRecognizer setMaximumNumberOfTouches: 0];
         [self addGestureRecognizer: panRecognizer];
     }

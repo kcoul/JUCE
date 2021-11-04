@@ -426,8 +426,8 @@ public:
             NSRect v = [view convertRect: [view frame] toView: nil];
             NSRect w = [window frame];
 
-            b.setTop ((int) v.origin.y);
-            b.setBottom ((int) (w.size.height - (v.origin.y + v.size.height)));
+            b.setTop ((int) (w.size.height - (v.origin.y + v.size.height)));
+            b.setBottom ((int) v.origin.y);
             b.setLeft ((int) v.origin.x);
             b.setRight ((int) (w.size.width - (v.origin.x + v.size.width)));
         }
@@ -1344,14 +1344,17 @@ public:
 
     static NSArray* getSupportedDragTypes()
     {
-        const auto type =
-               #if defined (MAC_OS_X_VERSION_10_13) && MAC_OS_X_VERSION_MIN_REQUIRED >= MAC_OS_X_VERSION_10_13
-                NSPasteboardTypeFileURL;
-               #else
-                kUTTypeFileURL;
-               #endif
+        const auto type = []
+        {
+           #if defined (MAC_OS_X_VERSION_10_13) && MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_X_VERSION_10_13
+            if (@available (macOS 10.13, *))
+                return NSPasteboardTypeFileURL;
+           #endif
 
-        return [NSArray arrayWithObjects: (NSString*) type, (NSString*) kPasteboardTypeFileURLPromise, NSPasteboardTypeString, nil];
+            return (NSString*) kUTTypeFileURL;
+        }();
+
+        return [NSArray arrayWithObjects: type, (NSString*) kPasteboardTypeFileURLPromise, NSPasteboardTypeString, nil];
     }
 
     BOOL sendDragCallback (const int type, id <NSDraggingInfo> sender)

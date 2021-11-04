@@ -1452,16 +1452,24 @@ public:
 
             if (! owner.isiOS())
             {
-                auto validArchs = owner.getValidArchs();
+                const auto validArchs = owner.getValidArchs();
 
                 if (! validArchs.isEmpty())
                 {
-                    const auto joined = std::accumulate (validArchs.begin(),
-                                                         validArchs.end(),
-                                                         String(),
-                                                         [] (String str, const var& v) { return str + v.toString() + " "; });
+                    const auto join = [] (const Array<var>& range)
+                    {
+                        return std::accumulate (range.begin(),
+                                                range.end(),
+                                                String(),
+                                                [] (String str, const var& v) { return str + v.toString() + " "; }).trim().quoted();
+                    };
 
-                    s.set ("VALID_ARCHS", joined.trim().quoted());
+                    s.set ("VALID_ARCHS", join (validArchs));
+
+                    auto excludedArchs = owner.getAllArchs();
+                    excludedArchs.removeIf ([&validArchs] (const auto& a) { return validArchs.contains (a); });
+
+                    s.set ("EXCLUDED_ARCHS", join (excludedArchs));
                 }
             }
 
@@ -2398,16 +2406,18 @@ private:
             {
                 mo.setNewLineString (getNewLineString());
 
-                mo << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"              << newLine
+                mo << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"                 << newLine
                    << "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">" << newLine
-                   << "<plist version=\"1.0\">"                                 << newLine
-                   << "<dict>"                                                  << newLine
-                   << "\t" << "<key>BuildSystemType</key>"                      << newLine
-                   << "\t" << "<string>Original</string>"                       << newLine
-                   << "\t" << "<key>DisableBuildSystemDeprecationWarning</key>" << newLine
-                   << "\t" << "<true/>"                                         << newLine
-                   << "</dict>"                                                 << newLine
-                   << "</plist>"                                                << newLine;
+                   << "<plist version=\"1.0\">"                                    << newLine
+                   << "<dict>"                                                     << newLine
+                   << "\t" << "<key>BuildSystemType</key>"                         << newLine
+                   << "\t" << "<string>Original</string>"                          << newLine
+                   << "\t" << "<key>DisableBuildSystemDeprecationWarning</key>"    << newLine
+                   << "\t" << "<true/>"                                            << newLine
+                   << "\t" << "<key>DisableBuildSystemDeprecationDiagnostic</key>" << newLine
+                   << "\t" << "<true/>"                                            << newLine
+                   << "</dict>"                                                    << newLine
+                   << "</plist>"                                                   << newLine;
             });
         }
         else
@@ -2474,7 +2484,8 @@ private:
         if (isUsingDefaultSigningIdentity (config))
             return iOS ? "iPhone Developer" : "Mac Developer";
 
-        return config.getCodeSignIdentityString();
+        const auto identity = config.getCodeSignIdentityString();
+        return identity.isNotEmpty() ? identity : "-";
     }
 
     StringPairArray getProjectSettings (const XcodeBuildConfiguration& config) const

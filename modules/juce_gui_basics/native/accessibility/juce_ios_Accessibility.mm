@@ -37,9 +37,11 @@ static void juceFreeAccessibilityPlatformSpecificData (UIAccessibilityElement* e
 namespace juce
 {
 
-#if (defined (__IPHONE_11_0) && __IPHONE_OS_VERSION_MIN_REQUIRED >= __IPHONE_11_0)
+#if defined (__IPHONE_11_0) && __IPHONE_OS_VERSION_MAX_ALLOWED >= __IPHONE_11_0
  #define JUCE_IOS_CONTAINER_API_AVAILABLE 1
 #endif
+
+JUCE_BEGIN_IGNORE_WARNINGS_GCC_LIKE ("-Wunguarded-availability", "-Wunguarded-availability-new")
 
 constexpr auto juceUIAccessibilityContainerTypeNone =
                    #if JUCE_IOS_CONTAINER_API_AVAILABLE
@@ -61,6 +63,8 @@ constexpr auto juceUIAccessibilityContainerTypeList =
                    #else
                     2;
                    #endif
+
+JUCE_END_IGNORE_WARNINGS_GCC_LIKE
 
 #define JUCE_NATIVE_ACCESSIBILITY_INCLUDED 1
 
@@ -117,7 +121,11 @@ private:
             addMethod (@selector (isAccessibilityElement),     getIsAccessibilityElement,     "c@:");
             addMethod (@selector (accessibilityFrame),         getAccessibilityFrame,         @encode (CGRect), "@:");
             addMethod (@selector (accessibilityElements),      getAccessibilityElements,      "@@:");
-            addMethod (@selector (accessibilityContainerType), getAccessibilityContainerType, "i@:");
+
+           #if JUCE_IOS_CONTAINER_API_AVAILABLE
+            if (@available (iOS 11.0, *))
+                addMethod (@selector (accessibilityContainerType), getAccessibilityContainerType, "i@:");
+           #endif
 
             addIvar<AccessibilityHandler*> ("handler");
 
@@ -206,15 +214,21 @@ private:
             addMethod (@selector (accessibilityElementIsFocused),        isFocused,   "c@:");
             addMethod (@selector (accessibilityViewIsModal),             getIsAccessibilityModal, "c@:");
 
-            addMethod (@selector (accessibilityActivate),  accessibilityPerformActivate,  "c@:");
-            addMethod (@selector (accessibilityIncrement), accessibilityPerformIncrement, "c@:");
-            addMethod (@selector (accessibilityDecrement), accessibilityPerformDecrement, "c@:");
+            addMethod (@selector (accessibilityActivate),      accessibilityPerformActivate,  "c@:");
+            addMethod (@selector (accessibilityIncrement),     accessibilityPerformIncrement, "c@:");
+            addMethod (@selector (accessibilityDecrement),     accessibilityPerformDecrement, "c@:");
+            addMethod (@selector (accessibilityPerformEscape), accessibilityPerformEscape,    "c@:");
 
-            addMethod (@selector (accessibilityDataTableCellElementForRow:column:), getAccessibilityDataTableCellElementForRowColumn, "@@:ii");
-            addMethod (@selector (accessibilityRowCount),                           getAccessibilityRowCount,                         "i@:");
-            addMethod (@selector (accessibilityColumnCount),                        getAccessibilityColumnCount,                      "i@:");
-            addMethod (@selector (accessibilityRowRange),                           getAccessibilityRowIndexRange,                    @encode (NSRange), "@:");
-            addMethod (@selector (accessibilityColumnRange),                        getAccessibilityColumnIndexRange,                 @encode (NSRange), "@:");
+           #if JUCE_IOS_CONTAINER_API_AVAILABLE
+            if (@available (iOS 11.0, *))
+            {
+                addMethod (@selector (accessibilityDataTableCellElementForRow:column:), getAccessibilityDataTableCellElementForRowColumn, "@@:ii");
+                addMethod (@selector (accessibilityRowCount),                           getAccessibilityRowCount,                         "i@:");
+                addMethod (@selector (accessibilityColumnCount),                        getAccessibilityColumnCount,                      "i@:");
+                addMethod (@selector (accessibilityRowRange),                           getAccessibilityRowIndexRange,                    @encode (NSRange), "@:");
+                addMethod (@selector (accessibilityColumnRange),                        getAccessibilityColumnIndexRange,                 @encode (NSRange), "@:");
+            }
+           #endif
 
             if (elementType == Type::textElement)
             {
@@ -394,6 +408,26 @@ private:
 
                 if (handler->hasFocus (false))
                     return accessibilityPerformPress (self, {});
+            }
+
+            return NO;
+        }
+
+        static BOOL accessibilityPerformEscape (id self, SEL)
+        {
+            if (auto* handler = getHandler (self))
+            {
+                if (auto* modal = Component::getCurrentlyModalComponent())
+                {
+                    if (auto* modalHandler = modal->getAccessibilityHandler())
+                    {
+                        if (modalHandler == handler || modalHandler->isParentOf (handler))
+                        {
+                            modal->exitModalState (0);
+                            return YES;
+                        }
+                    }
+                }
             }
 
             return NO;
