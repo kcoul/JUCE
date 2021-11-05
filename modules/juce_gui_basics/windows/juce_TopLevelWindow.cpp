@@ -138,8 +138,6 @@ TopLevelWindow::TopLevelWindow (const String& name, const bool shouldAddToDeskto
 
     setOpaque (true);
 
-    centreWithSize(800, 480);
-
     if (shouldAddToDesktop)
         Component::addToDesktop (TopLevelWindow::getDesktopWindowStyleFlags());
     else
