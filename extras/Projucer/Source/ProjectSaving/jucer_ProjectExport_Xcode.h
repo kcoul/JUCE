@@ -668,7 +668,7 @@ public:
     bool launchProject() override
     {
        #if JUCE_MAC
-        return getProjectBundle().startAsProcess();
+        return getIDEProjectFile().startAsProcess();
        #else
         return false;
        #endif
@@ -681,6 +681,11 @@ public:
        #else
         return false;
        #endif
+    }
+
+    File getIDEProjectFile() const override
+    {
+        return getProjectBundle();
     }
 
     //==============================================================================
