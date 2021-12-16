@@ -740,6 +740,10 @@ double AudioDeviceManager::chooseBestSampleRate (double rate) const
 {
     jassert (currentAudioDevice != nullptr);
 
+    //TODO: Report bug, this getter is returning nothing despite
+    //TODO: currentAudioDevice->getCurrentSampleRate() returning
+    //TODO: the correct 16kHz for a certain class of VOIP-oriented devices.
+    //TODO: UPDATE: CoreAudio is saying "Can't change sample rate" from 48kHz to 16kHz
     auto rates = currentAudioDevice->getAvailableSampleRates();
 
     if (rate > 0 && rates.contains (rate))
@@ -747,7 +751,8 @@ double AudioDeviceManager::chooseBestSampleRate (double rate) const
 
     rate = currentAudioDevice->getCurrentSampleRate();
 
-    if (rate > 0 && rates.contains (rate))
+    //TODO: Part of bug, the check for rates.size == 0 is the workaround
+    if (rate > 0 && (rates.contains (rate) || rates.size() == 0))
         return rate;
 
     double lowestAbove44 = 0.0;

@@ -1372,6 +1372,9 @@ public:
         int totalInputChanIndex = 0, totalOutputChanIndex = 0;
         int chanIndex = 0;
 
+        //TODO: The bug seems to be here, there appears to be a bogus
+        //TODO: 2nd device with 0 ins and 14 outs that cannot be open()ed
+        //TODO: Seen on Logitech C922, first non-defaulted init attempt only
         for (auto* d : devices)
         {
             BigInteger ins (inputChannels >> totalInputChanIndex);
