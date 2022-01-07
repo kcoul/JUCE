@@ -837,7 +837,7 @@ public:
     {
         // see https://developer.android.com/ndk/guides/audio/opensl-for-android.html
 
-        static const double rates[] = { 8000.0, 11025.0, 12000.0, 16000.0,
+        static const double rates[] = { 8000.0, 11025.0, 12000.0, 16000.0, 24000.0
                                         22050.0, 24000.0, 32000.0, 44100.0, 48000.0 };
 
         Array<double> retval (rates, numElementsInArray (rates));
