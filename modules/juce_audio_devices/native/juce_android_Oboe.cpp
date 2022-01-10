@@ -350,7 +350,7 @@ private:
 
     static Array<int> getDefaultSampleRates()
     {
-        static const int standardRates[] = { 8000, 11025, 12000, 16000,
+        static const int standardRates[] = { 8000, 11025, 12000, 16000, 24000
                                             22050, 24000, 32000, 44100, 48000 };
 
         Array<int> rates (standardRates, numElementsInArray (standardRates));
