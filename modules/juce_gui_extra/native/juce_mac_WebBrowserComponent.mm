@@ -32,8 +32,8 @@ namespace juce
 
 static NSURL* appendParametersToFileURL (const URL& url, NSURL* fileUrl)
 {
-    if (@available (macOS 10.9, *))
-    {
+    //if (@available (macOS 10.9, *))
+    //{
         const auto parameterNames = url.getParameterNames();
         const auto parameterValues = url.getParameterValues();
 
@@ -52,7 +52,7 @@ static NSURL* appendParametersToFileURL (const URL& url, NSURL* fileUrl)
         [components.get() setQueryItems: queryItems.get()];
 
         return [components.get() URL];
-    }
+    //}
 
     const auto queryString = url.getQueryString();
 
@@ -67,16 +67,16 @@ static NSMutableURLRequest* getRequestForURL (const String& url, const StringArr
 {
     NSString* urlString = juceStringToNS (url);
 
-     if (@available (macOS 10.9, *))
-     {
+     //if (@available (macOS 10.9, *))
+     //{
          urlString = [urlString stringByAddingPercentEncodingWithAllowedCharacters: [NSCharacterSet URLQueryAllowedCharacterSet]];
-     }
-     else
-     {
-         JUCE_BEGIN_IGNORE_WARNINGS_GCC_LIKE ("-Wdeprecated-declarations")
-         urlString = [urlString stringByAddingPercentEscapesUsingEncoding: NSUTF8StringEncoding];
-         JUCE_END_IGNORE_WARNINGS_GCC_LIKE
-     }
+     //}
+     //else
+     //{
+     //    JUCE_BEGIN_IGNORE_WARNINGS_GCC_LIKE ("-Wdeprecated-declarations")
+     //    urlString = [urlString stringByAddingPercentEscapesUsingEncoding: NSUTF8StringEncoding];
+     //    JUCE_END_IGNORE_WARNINGS_GCC_LIKE
+     //}
 
      if (NSURL* nsURL = [NSURL URLWithString: urlString])
      {
@@ -129,8 +129,8 @@ private:
             const auto modifierFlags = [event modifierFlags];
 
            #if defined (MAC_OS_X_VERSION_10_12) && MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_X_VERSION_10_12
-            if (@available (macOS 10.12, *))
-                return (modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask) == NSEventModifierFlagCommand;
+            //if (@available (macOS 10.12, *))
+            //    return (modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask) == NSEventModifierFlagCommand;
            #endif
 
             JUCE_BEGIN_IGNORE_WARNINGS_GCC_LIKE ("-Wdeprecated-declarations")
@@ -278,8 +278,8 @@ struct WebViewDelegateClass  : public ObjCClass<NSObject>
                               windowFeatures:),                                           createWebView);
 
        #if WKWEBVIEW_OPENPANEL_SUPPORTED
-        if (@available (macOS 10.12, *))
-            addMethod (@selector (webView:runOpenPanelWithParameters:initiatedByFrame:completionHandler:), runOpenPanel);
+        //if (@available (macOS 10.12, *))
+        //    addMethod (@selector (webView:runOpenPanelWithParameters:initiatedByFrame:completionHandler:), runOpenPanel);
        #endif
 
         registerClass();
@@ -587,11 +587,11 @@ class WebBrowserComponent::Pimpl
 public:
     Pimpl (WebBrowserComponent* owner)
     {
-        if (@available (macOS 10.10, *))
+        //if (@available (macOS 10.10, *))
             webView = std::make_unique<WKWebViewImpl> (owner);
        #if JUCE_MAC
-        else
-            webView = std::make_unique<WebViewImpl> (owner);
+        //else
+        //    webView = std::make_unique<WebViewImpl> (owner);
        #endif
 
         setView (webView->getWebView());

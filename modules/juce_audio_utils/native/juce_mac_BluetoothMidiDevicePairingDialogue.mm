@@ -157,11 +157,11 @@ private:
 bool BluetoothMidiDevicePairingDialogue::open (ModalComponentManager::Callback* exitCallback,
                                                Rectangle<int>* bounds)
 {
-    if (@available (macOS 10.11, *))
-    {
+    //if (@available (macOS 10.11, *))
+    //{
         new BluetoothMidiSelectorWindowHelper (exitCallback, bounds);
         return true;
-    }
+    //}
 
     std::unique_ptr<ModalComponentManager::Callback> cb (exitCallback);
     // This functionality is unavailable when targetting OSX < 10.11. Instead,
@@ -173,7 +173,7 @@ bool BluetoothMidiDevicePairingDialogue::open (ModalComponentManager::Callback* 
 
 bool BluetoothMidiDevicePairingDialogue::isAvailable()
 {
-    if (@available (macOS 10.11, *))
+    //if (@available (macOS 10.11, *))
         return true;
 
     return false;
