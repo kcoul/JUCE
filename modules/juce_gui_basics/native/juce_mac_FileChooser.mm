@@ -233,7 +233,7 @@ private:
 
         const auto okResult = []() -> NSInteger
         {
-            if (@available (macOS 10.9, *))
+            //if (@available (macOS 10.9, *))
                 return NSModalResponseOK;
 
             JUCE_BEGIN_IGNORE_WARNINGS_GCC_LIKE ("-Wdeprecated-declarations")

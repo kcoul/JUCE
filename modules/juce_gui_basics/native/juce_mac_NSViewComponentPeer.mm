@@ -108,7 +108,7 @@ public:
                                                            defer: YES];
             setOwner (window, this);
 
-            if (@available (macOS 10.10, *))
+            //if (@available (macOS 10.10, *))
                 [window setAccessibilityElement: YES];
 
             [window orderOut: nil];
@@ -119,7 +119,7 @@ public:
             if (! [window isOpaque])
                 [window setBackgroundColor: [NSColor clearColor]];
 
-           if (@available (macOS 10.9, *))
+           //if (@available (macOS 10.9, *))
                 [view setAppearance: [NSAppearance appearanceNamed: NSAppearanceNameAqua]];
 
             [window setHasShadow: ((windowStyleFlags & windowHasDropShadow) != 0)];
@@ -143,8 +143,8 @@ public:
             [window setRestorable: NO];
 
            #if defined (MAC_OS_X_VERSION_10_12) && (MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_X_VERSION_10_12)
-            if (@available (macOS 10.12, *))
-                [window setTabbingMode: NSWindowTabbingModeDisallowed];
+            //if (@available (macOS 10.12, *))
+            //    [window setTabbingMode: NSWindowTabbingModeDisallowed];
            #endif
 
             [notificationCenter  addObserver: view
@@ -827,7 +827,7 @@ public:
 
         auto cg = []
         {
-            if (@available (macOS 10.10, *))
+            //if (@available (macOS 10.10, *))
                 return (CGContextRef) [[NSGraphicsContext currentContext] CGContext];
 
             JUCE_BEGIN_IGNORE_WARNINGS_GCC_LIKE ("-Wdeprecated-declarations")
@@ -1866,11 +1866,11 @@ private:
         // Without setting contentsFormat macOS Big Sur will always set the invalid area
         // to be the entire frame.
        #if defined (MAC_OS_X_VERSION_10_12) && MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_X_VERSION_10_12
-        if (@available (macOS 10.12, *))
-        {
-            CALayer* layer = ((NSView*) self).layer;
-            layer.contentsFormat = kCAContentsFormatRGBA8Uint;
-        }
+        //if (@available (macOS 10.12, *))
+        //{
+        //    CALayer* layer = ((NSView*) self).layer;
+        //    layer.contentsFormat = kCAContentsFormatRGBA8Uint;
+        //}
        #endif
 
         sendSuperclassMessage<void> (self, @selector (viewWillDraw));
@@ -2392,7 +2392,7 @@ private:
 
     static NSAccessibilityRole getAccessibilitySubrole (id self, SEL)
     {
-        if (@available (macOS 10.10, *))
+        //if (@available (macOS 10.10, *))
             return [getAccessibleChild (self) accessibilitySubrole];
 
         return nil;

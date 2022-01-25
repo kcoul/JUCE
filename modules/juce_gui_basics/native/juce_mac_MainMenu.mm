@@ -366,18 +366,18 @@ private:
             {
                 NSArray* array = nil;
 
-                if (@available (macOS 10.11, *))
-                {
+                //if (@available (macOS 10.11, *))
+                //{
                     [menuNib instantiateWithOwner: NSApp
                                   topLevelObjects: &array];
-                }
-                else
-                {
-                    JUCE_BEGIN_IGNORE_WARNINGS_GCC_LIKE ("-Wdeprecated-declarations")
-                    [menuNib instantiateNibWithOwner: NSApp
-                                     topLevelObjects: &array];
-                    JUCE_END_IGNORE_WARNINGS_GCC_LIKE
-                }
+                //}
+                //else
+                //{
+                //    JUCE_BEGIN_IGNORE_WARNINGS_GCC_LIKE ("-Wdeprecated-declarations")
+                //    [menuNib instantiateNibWithOwner: NSApp
+                //                     topLevelObjects: &array];
+                //    JUCE_END_IGNORE_WARNINGS_GCC_LIKE
+                //}
 
                 for (id object in array)
                 {

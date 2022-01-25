@@ -161,8 +161,8 @@ namespace CoreTextTypeLayout
     {
         const auto flags = text.getJustification().getOnlyHorizontalFlags();
 
-        if (@available (macOS 10.8, *))
-        {
+        //if (@available (macOS 10.8, *))
+        //{
             switch (flags)
             {
                 case Justification::right:                  return kCTTextAlignmentRight;
@@ -170,7 +170,7 @@ namespace CoreTextTypeLayout
                 case Justification::horizontallyJustified:  return kCTTextAlignmentJustified;
                 default:                                    return kCTTextAlignmentLeft;
             }
-        }
+        //}
 
         JUCE_BEGIN_IGNORE_WARNINGS_GCC_LIKE ("-Wdeprecated-declarations")
 
@@ -582,7 +582,7 @@ public:
 
         if (fontRef != nullptr)
         {
-            if (@available (macOS 10.11, *))
+            //if (@available (macOS 10.11, *))
                 canBeUsedForLayout = CTFontManagerRegisterGraphicsFont (fontRef, nullptr);
 
             ctFontRef.reset (CTFontCreateWithGraphicsFont (fontRef, referenceFontSize, nullptr, nullptr));
@@ -626,7 +626,7 @@ public:
     {
         if (fontRef != nullptr)
         {
-            if (@available (macOS 10.8, *))
+            //if (@available (macOS 10.8, *))
                 if (dataCopy.getSize() != 0)
                     CTFontManagerUnregisterGraphicsFont (fontRef, nullptr);
 

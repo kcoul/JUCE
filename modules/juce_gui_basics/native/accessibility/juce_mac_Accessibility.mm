@@ -57,13 +57,13 @@ private:
     public:
         static Holder create (AccessibilityHandler& handler)
         {
-            if (@available (macOS 10.10, *))
-            {
+            //if (@available (macOS 10.10, *))
+            //{
                 static AccessibilityElement cls;
                 Holder element ([cls.createInstance() init]);
                 object_setInstanceVariable (element.get(), "handler", &handler);
                 return element;
-            }
+            //}
 
             return {};
         }
@@ -883,7 +883,7 @@ static void sendHandlerNotification (const AccessibilityHandler& handler,
 
 static NSAccessibilityNotificationName layoutChangedNotification()
 {
-    if (@available (macOS 10.9, *))
+    //if (@available (macOS 10.9, *))
         return NSAccessibilityLayoutChangedNotification;
 
     static NSString* layoutChangedString = @"AXLayoutChanged";
@@ -936,8 +936,8 @@ void AccessibilityHandler::postAnnouncement (const String& announcementString, A
     if (! areAnyAccessibilityClientsActive())
         return;
 
-     if (@available (macOS 10.10, *))
-     {
+     //if (@available (macOS 10.10, *))
+     //{
         auto nsPriority = [priority]
         {
             switch (priority)
@@ -955,7 +955,7 @@ void AccessibilityHandler::postAnnouncement (const String& announcementString, A
                                 NSAccessibilityAnnouncementRequestedNotification,
                                 @{ NSAccessibilityAnnouncementKey: juceStringToNS (announcementString),
                                    NSAccessibilityPriorityKey:     @(nsPriority) });
-     }
+     //}
 }
 
 JUCE_END_IGNORE_WARNINGS_GCC_LIKE

@@ -971,8 +971,8 @@ public:
         {
             connection.reset();
 
-            if (@available (macOS 10.10, *))
-                return false;
+            //if (@available (macOS 10.10, *))
+            //    return false;
 
             // Workaround for macOS versions below 10.10 where HTTPS POST requests with keep-alive
             // fail with the NSURLErrorNetworkConnectionLost error code.
@@ -1143,10 +1143,10 @@ private:
                     // Workaround for an Apple bug. See https://github.com/AFNetworking/AFNetworking/issues/2334
                     [req HTTPBody];
 
-                    if (@available (macOS 10.10, *))
-                        connection = std::make_unique<URLConnectionState> (req, numRedirectsToFollow);
+                    //if (@available (macOS 10.10, *))
+                    //    connection = std::make_unique<URLConnectionState> (req, numRedirectsToFollow);
                    #if JUCE_MAC
-                    else
+                    //else
                         connection = std::make_unique<URLConnectionStatePreYosemite> (req, numRedirectsToFollow);
                    #endif
                 }
