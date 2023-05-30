@@ -157,12 +157,12 @@ public:
     /** Implements the PositionableAudioSource method. */
     bool isLooping() const override;
 
+    PositionableAudioSource* positionableSource = nullptr;
 private:
     //==============================================================================
     PositionableAudioSource* source = nullptr;
     ResamplingAudioSource* resamplerSource = nullptr;
     BufferingAudioSource* bufferingSource = nullptr;
-    PositionableAudioSource* positionableSource = nullptr;
     AudioSource* masterSource = nullptr;
 
     CriticalSection callbackLock;
