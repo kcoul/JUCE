@@ -801,7 +801,7 @@ bool StreamingSocket::connect (const File& path, int timeOutMillisecs)
     domainFile = path;
     isListener = false;
 
-    connected = SocketHelpers::connectSocket (handle, readLock, path, timeOutMillisecs);
+    connected = SocketHelpers::connectSocket (handle, readLock, path, timeOutMillisecs, options);
 
     if (! connected)
         return false;

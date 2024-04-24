@@ -89,12 +89,12 @@ private:
 struct ChildProcessCoordinator::Connection final : public InterprocessConnection,
                                                    private ChildProcessPingThread
 {
-    Connection (ChildProcessCoordinator& m, const String& pipeName, int timeout)
+    Connection (ChildProcessCoordinator& m, const String& pipeName, int readTimeout, int pingTimeout)
         : InterprocessConnection (false, magicCoordWorkerConnectionHeader),
-          ChildProcessPingThread (timeout),
+          ChildProcessPingThread (pingTimeout),
           owner (m)
     {
-        createPipe (pipeName, timeoutMs);
+        createPipe (pipeName, readTimeout);
     }
 
     ~Connection() override
@@ -164,6 +164,7 @@ bool ChildProcessCoordinator::launchWorkerProcess (const File& executable, const
     StringArray args;
     args.add (executable.getFullPathName());
     args.add (getCommandLinePrefix (commandLineUniqueID) + pipeName);
+    args.addArray(customArgs);
 
     childProcess = [&]() -> std::shared_ptr<ChildProcess>
     {
