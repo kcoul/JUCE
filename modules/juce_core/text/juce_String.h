@@ -1218,6 +1218,9 @@ public:
     /** */
     std::string toStdString() const;
 
+    /** Automatic type conversion */
+    operator std::string() const { return toStdString(); }
+
     //==============================================================================
     /** Creates a String from a UTF-8 encoded buffer.
         If the size is < 0, it'll keep reading until it hits a zero.
