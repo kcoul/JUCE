@@ -565,7 +565,7 @@ public:
     static void initialiseJUCE (void* jniEnv, void* jContext);
    #endif
 
-protected:
+//protected:
     //==============================================================================
     /** Returns the current priority of this thread.
 

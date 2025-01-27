@@ -307,6 +307,7 @@ public:
     bool sendCommandLineToPreexistingInstance();
    #endif
 
+    virtual bool urlOpened(const URL& url) { return false; }
 private:
     //==============================================================================
     static JUCEApplicationBase* appInstance;
