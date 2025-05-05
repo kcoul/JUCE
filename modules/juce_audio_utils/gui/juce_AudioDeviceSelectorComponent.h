@@ -89,6 +89,8 @@ public:
     /** @internal */
     void resized() override;
 
+    void childBoundsChanged (Component* child) override;
+
 private:
     //==============================================================================
     void handleBluetoothButton();
