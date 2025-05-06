@@ -174,7 +174,7 @@
     #if ! JUCE_MAC_API_VERSION_CAN_BE_BUILT (11, 1)
       #error "The macOS 11.1 SDK (Xcode 12.4+) is required to build JUCE apps. You can create apps that run on macOS 10.11+ by changing the deployment target."
     #elif MAC_OS_X_VERSION_MIN_REQUIRED < MAC_OS_X_VERSION_10_9
-      #error "Building for OSX 10.8 and earlier is no longer supported!"
+      #error "Building for OSX 10.10 and earlier is no longer supported!"
     #endif
   #endif
 #endif

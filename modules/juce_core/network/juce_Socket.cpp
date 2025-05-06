@@ -129,7 +129,6 @@ namespace SocketHelpers
                 && (isDatagram ? ((! allowBroadcast) || setOption (handle, SO_BROADCAST, (int) 1))
                 : !isUnixDomain ? setOption(handle, IPPROTO_TCP, TCP_NODELAY, (int)1)
                                 : true);
-
     }
 
     static void closeSocket (std::atomic<int>& handle,
@@ -595,7 +594,7 @@ namespace SocketHelpers
             {
                 auto h = (SocketHandle) handle.load();
                 setSocketBlockingState (h, true);
-                resetSocketOptions (h, false, false, options, true);
+                resetSocketOptions (h, false, false, options, false);
             }
         }
 
@@ -603,7 +602,7 @@ namespace SocketHelpers
     }
 
     static bool connectSocket(std::atomic<int>& handle, CriticalSection& readLock, const File& path,
-                                  int timeOutMillisecs) noexcept {
+                                  int timeOutMillisecs, const SocketOptions& options) noexcept {
         bool success = false;
 
         auto newHandle = socket(AF_UNIX, SOCK_STREAM, 0);
@@ -642,7 +641,7 @@ namespace SocketHelpers
 
             if (success) {
                 setSocketBlockingState(newHandle, true);
-                resetSocketOptions(newHandle, false, false, SocketOptions{}, true);
+                resetSocketOptions(newHandle, false, false, options, true);
                 handle = (int)newHandle;
             } else {
                #if JUCE_WINDOWS
@@ -699,8 +698,9 @@ StreamingSocket::StreamingSocket (const String& host, int portNum, int h, const 
     SocketHelpers::resetSocketOptions ((SocketHandle) h, false, false, options, false);
 }
 
-StreamingSocket::StreamingSocket (const File& path, int h)
-    : domainFile(path),
+StreamingSocket::StreamingSocket (const File& path, int h, const SocketOptions& optionsIn)
+    : options (optionsIn),
+      domainFile(path),
       handle (h),
       connected (true)
 {
@@ -814,7 +814,7 @@ bool StreamingSocket::connect (const File& path, int timeOutMillisecs)
     domainFile = path;
     isListener = false;
 
-    connected = SocketHelpers::connectSocket (handle, readLock, path, timeOutMillisecs);
+    connected = SocketHelpers::connectSocket (handle, readLock, path, timeOutMillisecs, options);
 
     if (! connected)
         return false;

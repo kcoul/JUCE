@@ -216,6 +216,15 @@ public:
     /** Returns the OS's socket handle that's currently open. */
     int getRawSocketHandle() const noexcept                     { return handle; }
 
+    /** Returns the OS's socket handle that's currently open. The ownwership of the handle
+        is transferred to the caller.
+    */
+    int releaseRawSocketHandle() noexcept {
+        int ret = handle;
+        handle = -1;
+        return ret;
+    }
+
     //==============================================================================
     /** Waits until the socket is ready for reading or writing.
 
@@ -318,7 +327,7 @@ private:
     mutable CriticalSection readLock;
 
     StreamingSocket (const String& hostname, int portNumber, int handle, const SocketOptions& options);
-    StreamingSocket (const File& path, int handle);
+    StreamingSocket (const File& path, int handle, const SocketOptions& options);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (StreamingSocket)
 };
