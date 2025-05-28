@@ -190,10 +190,11 @@ public:
     [[deprecated ("Replaced by launchWorkerProcess.")]]
     bool launchSlaveProcess (const File& executableToLaunch,
                              const String& commandLineUniqueID,
+                             const StringArray& customArgs,
                              int timeoutMs = 0,
                              int streamFlags = ChildProcess::wantStdOut | ChildProcess::wantStdErr)
     {
-        return launchWorkerProcess (executableToLaunch, commandLineUniqueID, timeoutMs, streamFlags);
+        return launchWorkerProcess (executableToLaunch, commandLineUniqueID, customArgs, timeoutMs, streamFlags);
     }
 
     /** Sends a kill message to the worker, and disconnects from it.
