@@ -611,6 +611,11 @@ public:
     */
     bool setBusesLayoutWithoutEnabling (const BusesLayout&);
 
+    /** Provides a way to extend the channel info provided to the AU framework.
+    See https://developer.apple.com/documentation/audiotoolbox/auaudiounit/1387685-channelcapabilities
+ */
+    virtual Array<std::pair<short, short>> getAUChannelInfo() const { return {}; }
+
     /** Provides the current channel layouts of this audio processor. */
     BusesLayout getBusesLayout() const;
 
