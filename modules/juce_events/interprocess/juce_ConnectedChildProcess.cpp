@@ -164,6 +164,7 @@ bool ChildProcessCoordinator::sendMessageToWorker (const MemoryBlock& mb)
 }
 
 bool ChildProcessCoordinator::launchWorkerProcess (const File& executable, const String& commandLineUniqueID,
+                                                   const StringArray& customArgs,
                                                    int timeoutMs, int streamFlags)
 {
     killWorkerProcess();
@@ -173,6 +174,7 @@ bool ChildProcessCoordinator::launchWorkerProcess (const File& executable, const
     StringArray args;
     args.add (executable.getFullPathName());
     args.add (getCommandLinePrefix (commandLineUniqueID) + pipeName);
+    args.addArray(customArgs);
 
     childProcess = [&]() -> std::shared_ptr<ChildProcess>
     {
