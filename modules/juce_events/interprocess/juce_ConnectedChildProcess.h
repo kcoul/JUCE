@@ -184,17 +184,20 @@ public:
     bool launchWorkerProcess (const File& executableToLaunch,
                               const String& commandLineUniqueID,
                               const StringArray& customArgs,
-                              int timeoutMs = 0,
+                              int readTimeoutMs = 0,
+                              int pingTimeoutMs = 0,
                               int streamFlags = ChildProcess::wantStdOut | ChildProcess::wantStdErr);
 
     [[deprecated ("Replaced by launchWorkerProcess.")]]
     bool launchSlaveProcess (const File& executableToLaunch,
                              const String& commandLineUniqueID,
                              const StringArray& customArgs,
-                             int timeoutMs = 0,
+                             int readTimeoutMs = 0,
+                             int pingTimeoutMs = 0,
                              int streamFlags = ChildProcess::wantStdOut | ChildProcess::wantStdErr)
     {
-        return launchWorkerProcess (executableToLaunch, commandLineUniqueID, customArgs, timeoutMs, streamFlags);
+        return launchWorkerProcess (executableToLaunch, commandLineUniqueID, customArgs, readTimeoutMs, pingTimeoutMs,
+                                   streamFlags);
     }
 
     /** Sends a kill message to the worker, and disconnects from it.
