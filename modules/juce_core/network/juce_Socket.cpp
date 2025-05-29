@@ -601,10 +601,6 @@ namespace SocketHelpers
                     if (waitForReadiness(cvHandle, readLock, false, timeOutMillisecs) == 1) {
                         success = true;
                     }
-                } else {
-#if JUCE_WINDOWS
-                    std::cerr << "connect failed: error " << result << std::endl;
-#endif
                 }
             }
 
