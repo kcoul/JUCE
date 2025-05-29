@@ -71,9 +71,9 @@ public:
     /** The provided value will be used to enable the socket's isUnixDomain property.
         If this property is not enabled, the socket will not use a Unix domain.
     */
-    [[nodiscard]] SocketOptions usingUnixDomain (bool isUnixDomain) const
+    [[nodiscard]] SocketOptions usingUnixDomain (bool unixDomain) const
     {
-        return withMember (*this, &SocketOptions::isUnixDomain, isUnixDomain);
+        return withMember (*this, &SocketOptions::isUnixDomain, unixDomain);
     }
 
     /** @see withReceiveBufferSize() */
