@@ -229,6 +229,15 @@ public:
     /** Returns the OS's socket handle that's currently open. */
     int getRawSocketHandle() const noexcept                     { return handle; }
 
+    /** Returns the OS's socket handle that's currently open. The ownwership of the handle
+        is transferred to the caller.
+    */
+    int releaseRawSocketHandle() noexcept {
+        int ret = handle;
+        handle = -1;
+        return ret;
+    }
+    
     //==============================================================================
     /** Waits until the socket is ready for reading or writing.
 
