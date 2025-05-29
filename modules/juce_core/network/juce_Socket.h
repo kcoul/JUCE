@@ -157,6 +157,19 @@ public:
     */
     bool bindToPort (int localPortNumber, const String& localAddress);
 
+    /** Binds the socket to the specified local port and local IPv6 address.
+
+        If localAddress is not an empty string then the socket will be bound to localAddress
+        as well. This is useful if you would like to bind your socket to a specific network
+        adapter. Note that localAddress must be an IP address assigned to one of your
+        network address otherwise this function will fail.
+
+        @returns  true on success; false may indicate that another socket is already bound
+                   on the same port
+        @see bindToPort(int localPortNumber), IPAddress::getAllAddresses
+    */
+    bool bindToPort6 (int localPortNumber, const String& localAddress);
+
     /** Binds the socket to the specified path.
 
         @returns  true on success; false may indicate that another socket is already bound
@@ -267,6 +280,22 @@ public:
         @see waitForNextConnection
     */
     bool createListener (int portNumber, const String& localHostName = String());
+
+    /** Puts this socket into "listener" mode.
+
+        When in this mode, your thread can call waitForNextConnection() repeatedly,
+        which will spawn new sockets for each new connection, so that these can
+        be handled in parallel by other threads.
+
+        @param portNumber       the port number to listen on
+        @param localHostName    the interface IPv6 address to listen on - pass an empty
+                                string to listen on all addresses
+        @param ipv6Only         if set to true, only IPv6 connections are possible
+
+        @returns  true if it manages to open the socket successfully
+        @see waitForNextConnection
+    */
+    bool createListener6(int portNumber, const String& localHostName = String(), bool ipv6Only = false);
 
     /** Puts this socket into "listener" mode.
 

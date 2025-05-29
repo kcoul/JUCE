@@ -255,6 +255,25 @@ namespace SocketHelpers
         return ::bind (handle, (struct sockaddr*) &addr, sizeof (addr)) >= 0;
     }
 
+    static bool bindSocket6 (SocketHandle handle, int port, const String& address) noexcept
+    {
+        if (handle == invalidSocket || ! isValidPortNumber (port))
+            return false;
+
+        struct sockaddr_in6 addr;
+        zerostruct (addr); // (can't use "= { 0 }" on this object because it's typedef'ed as a C struct)
+
+        addr.sin6_family = PF_INET6;
+        addr.sin6_port = htons ((uint16) port);
+        if (address.isNotEmpty()) {
+            inet_pton(AF_INET6, address.toRawUTF8(), &addr.sin6_addr);
+        } else {
+            addr.sin6_addr = in6addr_any;
+        }
+
+        return ::bind (handle, (struct sockaddr*) &addr, sizeof (addr)) >= 0;
+    }
+
     static bool bindSocket (SocketHandle handle, const File& path) noexcept
     {
         if (handle == invalidSocket)
@@ -660,6 +679,13 @@ StreamingSocket::~StreamingSocket()
     close();
 }
 
+bool StreamingSocket::bindToPort6 (int port, const String& addr)
+{
+    jassert (SocketHelpers::isValidPortNumber (port));
+
+    return SocketHelpers::bindSocket6 ((SocketHandle) handle.load(), port, addr);
+}
+
 bool StreamingSocket::bindToPath (const File& path)
 {
     return SocketHelpers::bindSocket ((SocketHandle) handle.load(), path);
@@ -808,6 +834,39 @@ bool StreamingSocket::createListener (int newPortNumber, const String& localHost
 
     if (SocketHelpers::bindSocket ((SocketHandle) handle.load(), portNumber, localHostName)
          && listen ((SocketHandle) handle.load(), SOMAXCONN) >= 0)
+    {
+        connected = true;
+        return true;
+    }
+
+    close();
+    return false;
+}
+
+bool StreamingSocket::createListener6 (int newPortNumber, const String& localHostName, bool ipv6Only)
+{
+    jassert (SocketHelpers::isValidPortNumber (newPortNumber));
+
+    if (connected)
+        close();
+
+    hostName = "listener";
+    portNumber = newPortNumber;
+    isListener = true;
+
+    handle = (int) socket (AF_INET6, SOCK_STREAM, 0);
+
+    if (handle < 0)
+        return false;
+
+#if ! JUCE_WINDOWS // on windows, adding this option produces behaviour different to posix
+    SocketHelpers::makeReusable (handle);
+#endif
+
+    SocketHelpers::setOption(handle, IPPROTO_IPV6, IPV6_V6ONLY, (int)ipv6Only);
+
+    if (SocketHelpers::bindSocket6 ((SocketHandle) handle.load(), portNumber, localHostName)
+        && listen ((SocketHandle) handle.load(), SOMAXCONN) >= 0)
     {
         connected = true;
         return true;
