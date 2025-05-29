@@ -73,6 +73,7 @@
  #if JUCE_LINUX || JUCE_BSD || JUCE_ANDROID
   #include <sys/types.h>
   #include <sys/socket.h>
+  #include <sys/un.h>
   #include <sys/errno.h>
   #include <unistd.h>
   #include <netinet/in.h>

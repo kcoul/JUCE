@@ -127,7 +127,8 @@ namespace SocketHelpers
                 && setOption (handle, SO_RCVBUF, receiveBufferSize)
                 && setOption (handle, SO_SNDBUF, sendBufferSize)
                 && (isDatagram ? ((! allowBroadcast) || setOption (handle, SO_BROADCAST, (int) 1))
-                               : setOption (handle, IPPROTO_TCP, TCP_NODELAY, (int) 1));
+                                : !options.getUsingUnixDomain() ? setOption(handle, IPPROTO_TCP, TCP_NODELAY, (int)1)
+                                                                  : true);
     }
 
     static void closeSocket (std::atomic<int>& handle,
@@ -182,6 +183,62 @@ namespace SocketHelpers
        #endif
     }
 
+    static void closeSocket (std::atomic<int>& handle, CriticalSection& readLock,
+                            bool isListener, const File& path, std::atomic<bool>& connected) noexcept
+    {
+        const auto h = (SocketHandle) handle.load();
+        handle = -1;
+
+        #if JUCE_WINDOWS
+        if (h != invalidSocket || connected) {
+            closesocket (h);
+            if (isListener) {
+                path.deleteFile();
+            }
+        }
+
+        // make sure any read process finishes before we delete the socket
+        CriticalSection::ScopedLockType lock (readLock);
+        connected = false;
+        #else
+        if (connected)
+        {
+            connected = false;
+
+            if (isListener) {
+                // need to do this to interrupt the accept() function..
+                StreamingSocket temp;
+                temp.connect (path, 1000);
+            }
+        }
+
+        if (h >= 0)
+        {
+            // unblock any pending read requests
+            ::shutdown (h, SHUT_RDWR);
+
+            {
+                // see man-page of recv on linux about a race condition where the
+                // shutdown command is lost if the receiving thread does not have
+                // a chance to process before close is called. On Mac OS X shutdown
+                // does not unblock a select call, so using a lock here will dead-lock
+                // both threads.
+                #if JUCE_LINUX || JUCE_BSD || JUCE_ANDROID
+                CriticalSection::ScopedLockType lock (readLock);
+                ::close (h);
+                #else
+                ::close (h);
+                CriticalSection::ScopedLockType lock (readLock);
+                #endif
+            }
+
+            if (isListener) {
+                path.deleteFile();
+            }
+        }
+        #endif
+    }
+
     static bool bindSocket (SocketHandle handle, int port, const String& address) noexcept
     {
         if (handle == invalidSocket || ! isValidPortNumber (port))
@@ -194,6 +251,25 @@ namespace SocketHelpers
         addr.sin_port = htons ((uint16) port);
         addr.sin_addr.s_addr = address.isNotEmpty() ? ::inet_addr (address.toRawUTF8())
                                                     : htonl (INADDR_ANY);
+
+        return ::bind (handle, (struct sockaddr*) &addr, sizeof (addr)) >= 0;
+    }
+
+    static bool bindSocket (SocketHandle handle, const File& path) noexcept
+    {
+        if (handle == invalidSocket)
+            return false;
+
+        struct sockaddr_un addr;
+        zerostruct (addr); // (can't use "= { 0 }" on this object because it's typedef'ed as a C struct)
+
+        auto spath = path.getFullPathName();
+        addr.sun_family = AF_UNIX;
+        #if JUCE_WINDOWS
+        strncpy_s(addr.sun_path, sizeof(addr.sun_path), spath.getCharPointer(), (size_t)spath.length());
+        #else
+        strncpy(addr.sun_path, spath.getCharPointer(), (size_t)spath.length());
+        #endif
 
         return ::bind (handle, (struct sockaddr*) &addr, sizeof (addr)) >= 0;
     }
@@ -468,6 +544,65 @@ namespace SocketHelpers
         return success;
     }
 
+    static bool connectSocket(std::atomic<int>& handle,
+                              CriticalSection& readLock,
+                              const File& path,
+                              int timeOutMillisecs,
+                              const SocketOptions& options) noexcept {
+        bool success = false;
+
+        auto newHandle = socket(AF_UNIX, SOCK_STREAM, 0);
+
+        if (newHandle != invalidSocket) {
+            setSocketBlockingState(newHandle, false);
+
+            struct sockaddr_un addr;
+            zerostruct(addr);  // (can't use "= { 0 }" on this object because it's typedef'ed as a C struct)
+
+            auto spath = path.getFullPathName();
+            addr.sun_family = AF_UNIX;
+#if JUCE_WINDOWS
+            strncpy_s(addr.sun_path, sizeof(addr.sun_path), spath.getCharPointer(), (size_t)spath.length());
+#else
+            strncpy(addr.sun_path, spath.getCharPointer(), (size_t)spath.length());
+#endif
+
+            auto result = ::connect(newHandle, (struct sockaddr*)&addr, sizeof(addr));
+            success = (result >= 0);
+
+            if (!success) {
+#if JUCE_WINDOWS
+                if (result == SOCKET_ERROR && WSAGetLastError() == WSAEWOULDBLOCK)
+#else
+                if (errno == EINPROGRESS)
+#endif
+                {
+                    std::atomic<int> cvHandle{(int)newHandle};
+
+                    if (waitForReadiness(cvHandle, readLock, false, timeOutMillisecs) == 1) {
+                        success = true;
+                    }
+                } else {
+#if JUCE_WINDOWS
+                    std::cerr << "connect failed: error " << result << std::endl;
+#endif
+                }
+            }
+
+            if (success) {
+                setSocketBlockingState(newHandle, true);
+                resetSocketOptions(newHandle, false, false, options);
+                handle = (int)newHandle;
+            } else {
+#if JUCE_WINDOWS
+                closesocket(newHandle);
+#else
+                ::close(newHandle);
+#endif
+            }
+        }
+    }
+
     static void makeReusable (int handle) noexcept
     {
         setOption ((SocketHandle) handle, SO_REUSEADDR, (int) 1);
@@ -511,9 +646,23 @@ StreamingSocket::StreamingSocket (const String& host, int portNum, int h, const 
     SocketHelpers::resetSocketOptions ((SocketHandle) h, false, false, options);
 }
 
+StreamingSocket::StreamingSocket (const File& path, int h, const SocketOptions& optionsIn)
+    : domainFile(path),
+      handle (h),
+      connected (true)
+{
+    SocketHelpers::initSockets();
+    SocketHelpers::resetSocketOptions ((SocketHandle) h, false, false, optionsIn);
+}
+
 StreamingSocket::~StreamingSocket()
 {
     close();
+}
+
+bool StreamingSocket::bindToPath (const File& path)
+{
+    return SocketHelpers::bindSocket ((SocketHandle) handle.load(), path);
 }
 
 //==============================================================================
@@ -590,12 +739,47 @@ bool StreamingSocket::connect (const String& remoteHostName, int remotePortNumbe
     return true;
 }
 
+bool StreamingSocket::connect (const File& path, int timeOutMillisecs)
+{
+    if (isListener)
+    {
+        // a listener socket can't connect to another one!
+        jassertfalse;
+        return false;
+    }
+
+    if (connected)
+        close();
+
+    domainFile = path;
+    isListener = false;
+
+    connected = SocketHelpers::connectSocket (handle, readLock, path, timeOutMillisecs, options);
+
+    if (! connected)
+        return false;
+
+    if (! SocketHelpers::resetSocketOptions ((SocketHandle) handle.load(), false, false, options))
+    {
+        close();
+        return false;
+    }
+
+    return true;
+}
+
 void StreamingSocket::close()
 {
-    if (handle >= 0)
-        SocketHelpers::closeSocket (handle, readLock, isListener, portNumber, connected);
+    if (handle >= 0) {
+        if (portNumber > 0) {
+            SocketHelpers::closeSocket(handle, readLock, isListener, portNumber, connected);
+        } else {
+            SocketHelpers::closeSocket(handle, readLock, isListener, domainFile, connected);
+        }
+    }
 
     hostName.clear();
+    domainFile = File();
     portNumber = 0;
     handle = -1;
     isListener = false;
@@ -633,6 +817,29 @@ bool StreamingSocket::createListener (int newPortNumber, const String& localHost
     return false;
 }
 
+bool StreamingSocket::createListener (const File& path)
+{
+    if (connected)
+        close();
+
+    isListener = true;
+
+    handle = (int) socket (AF_UNIX, SOCK_STREAM, 0);
+
+    if (handle < 0)
+        return false;
+
+    if (SocketHelpers::bindSocket ((SocketHandle) handle.load(), path)
+        && listen ((SocketHandle) handle.load(), SOMAXCONN) >= 0)
+    {
+        connected = true;
+        return true;
+    }
+
+    close();
+    return false;
+}
+
 StreamingSocket* StreamingSocket::waitForNextConnection() const
 {
     // To call this method, you first have to use createListener() to
@@ -657,6 +864,9 @@ bool StreamingSocket::isLocal() const noexcept
 {
     if (! isConnected())
         return false;
+
+    if (domainFile.exists())
+        return true;
 
     IPAddress currentIP (SocketHelpers::getConnectedAddress ((SocketHandle) handle.load()));
 

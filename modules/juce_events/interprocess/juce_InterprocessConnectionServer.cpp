@@ -61,6 +61,22 @@ bool InterprocessConnectionServer::beginWaitingForSocket (const int portNumber, 
     return false;
 }
 
+bool InterprocessConnectionServer::beginWaitingForSocket (const File& path)
+{
+    stop();
+
+    socket.reset (new StreamingSocket());
+
+    if (socket->createListener (path))
+    {
+        startThread();
+        return true;
+    }
+
+    socket.reset();
+    return false;
+}
+
 void InterprocessConnectionServer::stop()
 {
     signalThreadShouldExit();

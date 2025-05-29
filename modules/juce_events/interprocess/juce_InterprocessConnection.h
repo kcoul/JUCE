@@ -104,6 +104,20 @@ public:
                           int portNumber,
                           int timeOutMillisecs);
 
+    /** Tries to connect this object to a (unix domain) socket.
+
+        For this to work, this machine needs to have a InterprocessConnectionServer
+        object waiting to receive client connections on this path.
+
+        @param path             the path of the unix domain socket
+        @param timeOutMillisecs     how long to keep trying before giving up
+        @returns true if the connection is established successfully
+        @see Socket
+    */
+    bool connectToSocket (const File& path,
+                          int timeOutMillisecs);
+
+
     /** Tries to connect the object to an existing named pipe.
 
         For this to work, another process on the same computer must already have opened

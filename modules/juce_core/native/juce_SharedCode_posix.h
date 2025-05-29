@@ -248,7 +248,7 @@ bool File::isDirectory() const
     juce_statStruct info;
 
     return fullPath.isNotEmpty()
-             && (juce_stat (fullPath, info) && ((info.st_mode & S_IFDIR) != 0));
+             && (juce_stat(fullPath, info) && ((info.st_mode & S_IFMT) == S_IFDIR));
 }
 
 bool File::exists() const

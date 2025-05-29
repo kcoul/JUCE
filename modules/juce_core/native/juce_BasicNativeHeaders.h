@@ -63,6 +63,7 @@
  #endif
 
  #include <sys/socket.h>
+ #include <sys/un.h>
  #include <sys/sysctl.h>
  #include <sys/stat.h>
  #include <sys/param.h>
@@ -115,6 +116,7 @@
  #include <ctime>
  #include <wininet.h>
  #include <nb30.h>
+ #include <afunix.h>
  #include <winsock2.h>
  #include <ws2tcpip.h>
  #include <iphlpapi.h>

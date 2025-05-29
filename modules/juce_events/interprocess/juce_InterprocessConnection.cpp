@@ -123,6 +123,23 @@ bool InterprocessConnection::connectToSocket (const String& hostName,
     return false;
 }
 
+bool InterprocessConnection::connectToSocket (const File& path,
+                                             int timeOutMillisecs)
+{
+    disconnect();
+
+    auto s = std::make_unique<StreamingSocket>();
+
+    if (s->connect (path, timeOutMillisecs))
+    {
+        const ScopedWriteLock sl (pipeAndSocketLock);
+        initialiseWithSocket (std::move (s));
+        return true;
+    }
+
+    return false;
+}
+
 bool InterprocessConnection::connectToPipe (const String& pipeName, int timeoutMs)
 {
     disconnect();

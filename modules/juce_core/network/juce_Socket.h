@@ -68,20 +68,32 @@ public:
         return withMember (*this, &SocketOptions::sendBufferSize, size);
     }
 
+    /** The provided value will be used to enable the socket's isUnixDomain property.
+        If this property is not enabled, the socket will not use a Unix domain.
+    */
+    [[nodiscard]] SocketOptions usingUnixDomain (bool isUnixDomain) const
+    {
+        return withMember (*this, &SocketOptions::isUnixDomain, isUnixDomain);
+    }
+
     /** @see withReceiveBufferSize() */
     [[nodiscard]] auto getReceiveBufferSize() const { return receiveBufferSize; }
 
     /** @see withSendBufferSize() */
     [[nodiscard]] auto getSendBufferSize() const    { return sendBufferSize; }
 
+    /** @see usingUnixDomain() */
+    [[nodiscard]] auto getUsingUnixDomain() const    { return isUnixDomain; }
+
 private:
     std::optional<int> receiveBufferSize;
     std::optional<int> sendBufferSize;
+    std::optional<bool> isUnixDomain;
 };
 
 //==============================================================================
 /**
-    A wrapper for a streaming (TCP) socket.
+    A wrapper for a streaming (TCP & Unix Domain) socket.
 
     This allows low-level use of sockets; for an easier-to-use messaging layer on top of
     sockets, you could also try the InterprocessConnection class.
@@ -145,6 +157,14 @@ public:
     */
     bool bindToPort (int localPortNumber, const String& localAddress);
 
+    /** Binds the socket to the specified path.
+
+        @returns  true on success; false may indicate that another socket is already bound
+                  to the path
+    */
+    bool bindToPath (const File& path);
+
+
     /** Returns the local port number to which this socket is currently bound.
 
         This is useful if you need to know to which port the OS has actually bound your
@@ -154,6 +174,17 @@ public:
         @returns  -1 if the function fails
     */
     int getBoundPort() const noexcept;
+
+    /** Tries to connect the socket to the path.
+
+        If timeOutMillisecs is 0, then this method will block until the operating system
+        rejects the connection (which could take a long time).
+
+        @returns  true if it succeeds, false if otherwise
+        @see isConnected
+    */
+    bool connect (const File& path,
+                  int timeOutMillisecs = 3000);
 
     /** Tries to connect the socket to hostname:port.
 
@@ -237,6 +268,19 @@ public:
     */
     bool createListener (int portNumber, const String& localHostName = String());
 
+    /** Puts this socket into "listener" mode.
+
+        When in this mode, your thread can call waitForNextConnection() repeatedly,
+        which will spawn new sockets for each new connection, so that these can
+        be handled in parallel by other threads.
+
+        @param path       the path to listen on
+
+        @returns  true if it manages to open the socket successfully
+        @see waitForNextConnection
+    */
+    bool createListener (const File& path);
+
     /** When in "listener" mode, this waits for a connection and spawns it as a new
         socket.
 
@@ -252,11 +296,13 @@ private:
     //==============================================================================
     SocketOptions options;
     String hostName;
+    File domainFile;
     std::atomic<int> portNumber { 0 }, handle { -1 };
     std::atomic<bool> connected { false }, isListener { false };
     mutable CriticalSection readLock;
 
     StreamingSocket (const String& hostname, int portNumber, int handle, const SocketOptions& options);
+    StreamingSocket (const File& path, int handle, const SocketOptions& options);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (StreamingSocket)
 };
