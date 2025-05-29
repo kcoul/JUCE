@@ -228,12 +228,12 @@ void ChildProcessCoordinator::killWorkerProcess()
 struct ChildProcessWorker::Connection final : public InterprocessConnection,
                                               private ChildProcessPingThread
 {
-    Connection (ChildProcessWorker& p, const String& pipeName, int timeout)
+    Connection (ChildProcessWorker& p, const String& pipeName, int readTimeout, int pingTimeout)
         : InterprocessConnection (false, magicCoordWorkerConnectionHeader),
-          ChildProcessPingThread (timeout),
+          ChildProcessPingThread (pingTimeout),
           owner (p)
     {
-        connectToPipe (pipeName, timeoutMs);
+        connectToPipe (pipeName, readTimeout);
     }
 
     ~Connection() override
@@ -298,7 +298,7 @@ bool ChildProcessWorker::sendMessageToCoordinator (const MemoryBlock& mb)
 
 bool ChildProcessWorker::initialiseFromCommandLine (const String& commandLine,
                                                     const String& commandLineUniqueID,
-                                                    int timeoutMs)
+                                                   int readTimeoutMs, int pingTimeoutMs)
 {
     auto prefix = getCommandLinePrefix (commandLineUniqueID);
 
@@ -309,7 +309,8 @@ bool ChildProcessWorker::initialiseFromCommandLine (const String& commandLine,
 
         if (pipeName.isNotEmpty())
         {
-            connection.reset (new Connection (*this, pipeName, timeoutMs <= 0 ? defaultTimeoutMs : timeoutMs));
+            connection.reset (new Connection (*this, pipeName, readTimeoutMs <= 0 ? defaultTimeoutMs : readTimeoutMs,
+                                            pingTimeoutMs <= 0 ? defaultTimeoutMs : pingTimeoutMs));
 
             if (connection->isConnected())
                 connection->startPinging();

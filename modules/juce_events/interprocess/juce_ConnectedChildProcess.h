@@ -85,7 +85,7 @@ public:
     */
     bool initialiseFromCommandLine (const String& commandLine,
                                     const String& commandLineUniqueID,
-                                    int timeoutMs = 0);
+                                    int readTimeoutMs = 0, int pingTimeoutMs = 0);
 
     //==============================================================================
     /** This will be called to deliver messages from the coordinator process.
