@@ -44,7 +44,7 @@ class Superprocess final : private ChildProcessCoordinator
 public:
     Superprocess()
     {
-        launchWorkerProcess (File::getSpecialLocation (File::currentExecutableFile), processUID, 0, 0);
+        launchWorkerProcess (File::getSpecialLocation (File::currentExecutableFile), processUID, {""}, 0, 0);
     }
 
     enum class State
