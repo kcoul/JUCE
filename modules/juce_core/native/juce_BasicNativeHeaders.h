@@ -116,6 +116,7 @@
  #include <ctime>
  #include <wininet.h>
  #include <nb30.h>
+ #include <ws2def.h>
  #include <afunix.h>
  #include <winsock2.h>
  #include <ws2tcpip.h>
