@@ -655,6 +655,7 @@ namespace SocketHelpers
                 #endif
             }
         }
+        return success;
     }
 
     static void makeReusable (int handle) noexcept
