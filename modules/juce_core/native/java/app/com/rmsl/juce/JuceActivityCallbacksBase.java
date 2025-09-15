@@ -32,57 +32,32 @@
   ==============================================================================
 */
 
-#ifndef DOXYGEN
+package com.rmsl.juce;
 
-namespace juce
+import android.app.Activity;
+import android.app.Application;
+import android.os.Bundle;
+
+public class JuceActivityCallbacksBase implements Application.ActivityLifecycleCallbacks
 {
+    @Override
+    public void onActivityCreated (Activity activity, Bundle savedInstanceState) {}
 
-template <typename Key, typename Value, size_t maxEntries = 128>
-class LruCache
-{
-public:
-    template <typename Fn>
-    const Value& get (Key key, Fn&& fn)
-    {
-        if (const auto iter = map.find (key); iter != map.end())
-        {
-            list.erase (iter->second.listIterator);
-            iter->second.listIterator = list.insert (list.end(), iter);
-            return iter->second.value;
-        }
+    @Override
+    public void onActivityStarted (Activity activity) {}
 
-        while (list.size() >= maxEntries)
-        {
-            const auto toRemove = list.begin();
-            map.erase (*toRemove);
-            list.erase (toRemove);
-        }
+    @Override
+    public void onActivityResumed (Activity activity) {}
 
-        auto value = fn (key);
-        const auto mapIteratorPair = map.emplace (std::move (key), Pair { std::move (value), {} });
+    @Override
+    public void onActivityPaused (Activity activity) {}
 
-        jassert (mapIteratorPair.second);
+    @Override
+    public void onActivityStopped (Activity activity) {}
 
-        mapIteratorPair.first->second.listIterator = list.insert (list.end(), mapIteratorPair.first);
-        return mapIteratorPair.first->second.value;
-    }
+    @Override
+    public void onActivitySaveInstanceState (Activity activity, Bundle outState) {}
 
-private:
-    struct Pair
-    {
-        using Map = std::map<Key, Pair>;
-        using MapIterator = typename Map::const_iterator;
-        using List = std::list<MapIterator>;
-        using ListIterator = typename List::const_iterator;
-
-        Value value;
-        ListIterator listIterator;
-    };
-
-    typename Pair::Map map;
-    typename Pair::List list;
-};
-
-} // namespace juce
-
-#endif
+    @Override
+    public void onActivityDestroyed (Activity activity) {}
+}

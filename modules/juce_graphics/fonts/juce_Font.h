@@ -298,6 +298,7 @@ public:
         This is the maximum height, from the top of the ascent to the bottom of the
         descenders.
 
+        This value is not affected by the optional ascent or descent override.
         @see withPointHeight, getHeight
     */
     float getHeightInPoints() const;
@@ -310,7 +311,9 @@ public:
 
     /** Returns the height of the font above its baseline, in points.
         This is the maximum height from the baseline to the top.
-        @see getHeight, getDescent
+
+        This value is affected by the optional ascent override.
+        @see getAscentOverride, getHeightInPoints, getDescentInPoints
     */
     float getAscentInPoints() const;
 
@@ -322,7 +325,9 @@ public:
 
     /** Returns the amount that the font descends below its baseline, in points.
         This is calculated as (getHeight() - getAscent()).
-        @see getAscent, getHeight
+
+        This value is affected by the optional descent override.
+        @see getDescentOverride, getHeightInPoints, getAscentInPoints
     */
     float getDescentInPoints() const;
 
@@ -372,6 +377,37 @@ public:
 
     /** Returns the kind of metrics used by this Font. */
     TypefaceMetricsKind getMetricsKind() const noexcept;
+
+    //==============================================================================
+    /** Returns an Span view of the features configured for this font instance.
+
+        Use Typeface::getSupportedFeatures() to determine what features this font
+        supports.
+
+        @see setFeatureEnabled, setFeatureDisabled, removeFeature,
+             Typeface::getSupportedFeatures
+    */
+    Span<const FontFeatureSetting> getFeatureSettings() const&;
+    Span<const FontFeatureSetting> getFeatureSettings() const&& = delete;
+
+    /** Enables or disables a font feature.
+
+        Use Typeface::getSupportedFeatures() to determine what features this font
+        supports.
+
+        @see setFeatureEnabled, setFeatureDisabled, removeFeature, Typeface::getSupportedFeatures
+    */
+    void setFeatureSetting (FontFeatureSetting featureSetting);
+
+    /** Removes a specific feature setting from this font.
+
+        If `featureToRemove` corresponds to a feature that is typically enabled by default (e.g.,
+        "calt" for contextual alternates, "liga" for standard ligatures), calling this method will
+        reset it to its default-enabled state.
+
+        @see setFeatureEnabled, setFeatureDisabled, Typeface::getSupportedFeatures
+    */
+    void removeFeatureSetting (FontFeatureTag featureToRemove);
 
     //==============================================================================
     /** Returns the font's horizontal scale.

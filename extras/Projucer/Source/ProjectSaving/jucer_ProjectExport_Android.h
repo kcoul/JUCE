@@ -132,7 +132,7 @@ public:
           androidGradleSettingsContent         (settings, Ids::androidGradleSettingsContent,         getUndoManager()),
           androidVersionCode                   (settings, Ids::androidVersionCode,                   getUndoManager(), "1"),
           androidMinimumSDK                    (settings, Ids::androidMinimumSDK,                    getUndoManager(), "24"),
-          androidTargetSDK                     (settings, Ids::androidTargetSDK,                     getUndoManager(), "34"),
+          androidTargetSDK                     (settings, Ids::androidTargetSDK,                     getUndoManager(), "35"),
           androidTheme                         (settings, Ids::androidTheme,                         getUndoManager()),
           androidExtraAssetsFolder             (settings, Ids::androidExtraAssetsFolder,             getUndoManager()),
           androidOboeRepositoryPath            (settings, Ids::androidOboeRepositoryPath,            getUndoManager()),
@@ -157,10 +157,10 @@ public:
           androidKeyStorePass                  (settings, Ids::androidKeyStorePass,                  getUndoManager(), "android"),
           androidKeyAlias                      (settings, Ids::androidKeyAlias,                      getUndoManager(), "androiddebugkey"),
           androidKeyAliasPass                  (settings, Ids::androidKeyAliasPass,                  getUndoManager(), "android"),
-          gradleVersion                        (settings, Ids::gradleVersion,                        getUndoManager(), "8.6"),
+          gradleVersion                        (settings, Ids::gradleVersion,                        getUndoManager(), "8.11.1"),
           gradleToolchain                      (settings, Ids::gradleToolchain,                      getUndoManager(), "clang"),
           gradleClangTidy                      (settings, Ids::gradleClangTidy,                      getUndoManager(), false),
-          androidPluginVersion                 (settings, Ids::androidPluginVersion,                 getUndoManager(), "8.4.1"),
+          androidPluginVersion                 (settings, Ids::androidPluginVersion,                 getUndoManager(), "8.10.0"),
           AndroidExecutable                    (getAppSettings().getStoredPath (Ids::androidStudioExePath, TargetOS::getThisOS()).get().toString())
     {
         name = getDisplayName();
@@ -171,7 +171,7 @@ public:
     void createToolchainExporterProperties (PropertyListBuilder& props)
     {
         props.add (new TextPropertyComponent (gradleVersion, "Gradle Version", 32, false),
-                   "The version of gradle that is used to build this app (4.10 is fine for JUCE)");
+                   "The version of gradle that is used to build this app");
 
         props.add (new TextPropertyComponent (androidPluginVersion, "Android Plug-in Version", 32, false),
                    "The version of the android build plugin for gradle that is used to build this app");
@@ -697,7 +697,7 @@ private:
         mo << "apply plugin: 'com.android." << (isLibrary() ? "library" : "application") << "'" << newLine << newLine;
 
         // NDK 26 is required for ANDROID_WEAK_API_DEFS, which is in turn required for weak-linking AFontMatcher
-        mo << "def ndkVersionString = \"26.2.11394342\"" << newLine << newLine;
+        mo << "def ndkVersionString = \"28.1.13356709\"" << newLine << newLine;
 
         mo << "android {"                                                                    << newLine;
         mo << "    compileSdk " << static_cast<int> (androidTargetSDK.get())                 << newLine;
@@ -1424,15 +1424,15 @@ private:
     {
         const auto icons = getIcons();
 
-        if (icons.big != nullptr && icons.small != nullptr)
+        if (icons.getBig() != nullptr && icons.getSmall() != nullptr)
         {
-            auto step = jmax (icons.big->getWidth(), icons.big->getHeight()) / 8;
+            auto step = jmax (icons.getBig()->getWidth(), icons.getBig()->getHeight()) / 8;
             writeIcon (folder.getChildFile ("drawable-xhdpi/icon.png"), build_tools::getBestIconForSize (icons, step * 8, false));
             writeIcon (folder.getChildFile ("drawable-hdpi/icon.png"),  build_tools::getBestIconForSize (icons, step * 6, false));
             writeIcon (folder.getChildFile ("drawable-mdpi/icon.png"),  build_tools::getBestIconForSize (icons, step * 4, false));
             writeIcon (folder.getChildFile ("drawable-ldpi/icon.png"),  build_tools::getBestIconForSize (icons, step * 3, false));
         }
-        else if (auto* icon = (icons.big != nullptr ? icons.big.get() : icons.small.get()))
+        else if (auto* icon = (icons.getBig() != nullptr ? icons.getBig() : icons.getSmall()))
         {
             writeIcon (folder.getChildFile ("drawable-mdpi/icon.png"), build_tools::rescaleImageForIcon (*icon, icon->getWidth()));
         }
@@ -1827,9 +1827,9 @@ private:
 
         if (! app->hasAttribute ("android:icon"))
         {
-            std::unique_ptr<Drawable> bigIcon (getBigIcon()), smallIcon (getSmallIcon());
+            const auto icons = getIcons();
 
-            if (bigIcon != nullptr || smallIcon != nullptr)
+            if (icons.getBig() != nullptr || icons.getSmall() != nullptr)
                 app->setAttribute ("android:icon", "@drawable/icon");
         }
 
@@ -1846,15 +1846,14 @@ private:
         setAttributeIfNotPresent (*act, "android:name", getActivityClassString());
 
         if (! act->hasAttribute ("android:configChanges"))
-            act->setAttribute ("android:configChanges", "keyboard|keyboardHidden|orientation|screenSize|navigation");
+            act->setAttribute ("android:configChanges", "keyboard|keyboardHidden|orientation|screenSize|navigation|smallestScreenSize|screenLayout|uiMode");
 
-        if (androidScreenOrientation.get() == "landscape")
+        if (androidScreenOrientation.get() != "unspecified")
         {
-            setAttributeIfNotPresent (*act, "android:screenOrientation", "userLandscape");
-        }
-        else
-        {
-            setAttributeIfNotPresent (*act, "android:screenOrientation", androidScreenOrientation.get());
+            setAttributeIfNotPresent (*act,
+                                      "android:screenOrientation",
+                                      androidScreenOrientation.get() == "landscape" ? "userLandscape"
+                                                                                    : androidScreenOrientation.get());
         }
 
         setAttributeIfNotPresent (*act, "android:launchMode", "singleTask");
