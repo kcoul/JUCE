@@ -3,9 +3,10 @@ set -euo pipefail
 
 source /Users/kicoulter/qnx800/qnxsdp-env.sh
 
-TARGET="${1:-12.2.0,gcc_ntox86_64}"
+TARGET="${1:-12.2.0,gcc_ntoaarch64le}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")"/../.. && pwd)"
-BUILD_DIR="$ROOT/build/qnx_hello_world"
+TARGET_DIR="${TARGET//,/_}"
+BUILD_DIR="$ROOT/build/qnx_hello_world/$TARGET_DIR"
 
 mkdir -p "$BUILD_DIR"
 
@@ -17,6 +18,7 @@ COMMON=(
   -DJUCE_WEB_BROWSER=0
   -DJUCE_JACK=0
   -DJUCE_ALSA=1
+  -DJUCE_USE_FONTCONFIG=0
   -I"$ROOT"
   -I"$ROOT/modules"
 )

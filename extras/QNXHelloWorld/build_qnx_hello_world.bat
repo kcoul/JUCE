@@ -5,15 +5,16 @@ call C:\Users\kicoulter\qnx800\qnxsdp-env.bat
 if errorlevel 1 exit /b %errorlevel%
 
 set TARGET=%1
-if "%TARGET%"=="" set TARGET=12.2.0,gcc_ntox86_64
+if "%TARGET%"=="" set TARGET=12.2.0,gcc_ntoaarch64le
 
 set ROOT=%~dp0..\..
 for %%I in ("%ROOT%") do set ROOT=%%~fI
-set BUILD_DIR=%ROOT%\build\qnx_hello_world
+set TARGET_DIR=%TARGET:,=_%
+set BUILD_DIR=%ROOT%\build\qnx_hello_world\%TARGET_DIR%
 
 if not exist "%BUILD_DIR%" mkdir "%BUILD_DIR%"
 
-set COMMON=-V%TARGET% -std=gnu++17 -DJUCE_GLOBAL_MODULE_SETTINGS_INCLUDED=1 -DJUCE_USE_CURL=0 -DJUCE_WEB_BROWSER=0 -DJUCE_JACK=0 -DJUCE_ALSA=1 -I"%ROOT%" -I"%ROOT%\modules"
+set COMMON=-V%TARGET% -std=gnu++17 -DJUCE_GLOBAL_MODULE_SETTINGS_INCLUDED=1 -DJUCE_USE_CURL=0 -DJUCE_WEB_BROWSER=0 -DJUCE_JACK=0 -DJUCE_ALSA=1 -DJUCE_USE_FONTCONFIG=0 -I"%ROOT%" -I"%ROOT%\modules"
 
 q++ %COMMON% -c "%ROOT%\modules\juce_core\juce_core.cpp" -o "%BUILD_DIR%\juce_core.o" || exit /b 1
 q++ %COMMON% -c "%ROOT%\modules\juce_core\juce_core_CompilationTime.cpp" -o "%BUILD_DIR%\juce_core_CompilationTime.o" || exit /b 1
