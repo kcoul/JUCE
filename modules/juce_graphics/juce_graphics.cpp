@@ -244,6 +244,9 @@ extern "C"
  #include "native/juce_Fonts_linux.cpp"
  #include "native/juce_IconHelpers_linux.cpp"
 
+#elif JUCE_QNX
+ #include "native/juce_Fonts_qnx.cpp"
+
 #elif JUCE_ANDROID
  #include "fonts/juce_TypefaceFileCache.h"
  #include "native/juce_GraphicsContext_android.cpp"

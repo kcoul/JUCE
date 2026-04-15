@@ -107,7 +107,7 @@
 #include "interprocess/juce_NetworkServiceDiscovery.h"
 #include "native/juce_ScopedLowPowerModeDisabler.h"
 
-#if JUCE_LINUX || JUCE_BSD
+#if JUCE_LINUX || JUCE_BSD || JUCE_QNX
  #include "native/juce_EventLoop_linux.h"
 #endif
 

@@ -35,7 +35,7 @@
 namespace juce
 {
 
-#if ! (JUCE_LINUX || JUCE_BSD)
+#if ! (JUCE_LINUX || JUCE_BSD || JUCE_QNX)
 
 #if JUCE_MAC || JUCE_IOS
  #include "../native/juce_Video_mac.h"

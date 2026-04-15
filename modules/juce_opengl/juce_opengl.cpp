@@ -66,7 +66,7 @@
 #endif
 
 #define JUCE_STATIC_LINK_GL_ES_VERSION_2_0 1
-#if !JUCE_ANDROID || JUCE_ANDROID_GL_ES_VERSION_3_0
+#if !(JUCE_ANDROID && ! JUCE_ANDROID_GL_ES_VERSION_3_0)
 #define JUCE_STATIC_LINK_GL_ES_VERSION_3_0 1
 #endif
 
@@ -106,6 +106,9 @@
 #elif JUCE_ANDROID
  #include <android/native_window.h>
  #include <android/native_window_jni.h>
+ #include <EGL/egl.h>
+
+#elif JUCE_QNX
  #include <EGL/egl.h>
 #endif
 
@@ -289,6 +292,9 @@ JUCE_IMPL_WGL_EXTENSION_FUNCTION (wglCreateContextAttribsARB)
 
 #elif JUCE_ANDROID
  #include "native/juce_OpenGL_android.h"
+
+#elif JUCE_QNX
+ #include "native/juce_OpenGL_qnx.h"
 
 #endif
 
