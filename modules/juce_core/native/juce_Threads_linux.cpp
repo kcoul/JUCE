@@ -60,7 +60,11 @@ bool Thread::createNativeThread (Priority)
 void Thread::killThread()
 {
     if (threadHandle != nullptr)
+       #if JUCE_QNX
+        pthread_cancel ((pthread_t) (pointer_sized_int) threadHandle.load());
+       #else
         pthread_cancel ((pthread_t) threadHandle.load());
+       #endif
 }
 
 // Until we implement Nice awareness, these don't do anything on Linux.

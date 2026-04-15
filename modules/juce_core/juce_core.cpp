@@ -70,10 +70,14 @@
  #endif
 
 #else
- #if JUCE_LINUX || JUCE_BSD || JUCE_ANDROID
+ #if JUCE_LINUX || JUCE_BSD || JUCE_QNX || JUCE_ANDROID
   #include <sys/types.h>
   #include <sys/socket.h>
-  #include <sys/errno.h>
+  #if JUCE_QNX
+   #include <errno.h>
+  #else
+   #include <sys/errno.h>
+  #endif
   #include <unistd.h>
   #include <netinet/in.h>
  #endif
@@ -88,7 +92,7 @@
   #include <sys/stat.h>
  #endif
 
- #if JUCE_LINUX || JUCE_BSD
+ #if JUCE_LINUX || JUCE_BSD || JUCE_QNX
   #include <stdio.h>
   #include <langinfo.h>
   #include <ifaddrs.h>
@@ -108,7 +112,7 @@
  #include <net/if.h>
  #include <sys/ioctl.h>
 
- #if ! (JUCE_ANDROID || JUCE_WASM)
+ #if ! (JUCE_ANDROID || JUCE_WASM || JUCE_QNX)
   #include <execinfo.h>
  #endif
 #endif
@@ -250,6 +254,21 @@
   #include "native/juce_Network_curl.cpp"
  #endif
  #include "native/juce_SharedCode_intel.h"
+ #include "native/juce_SystemStats_linux.cpp"
+ #include "native/juce_Threads_linux.cpp"
+ #include "native/juce_PlatformTimer_generic.cpp"
+
+//==============================================================================
+#elif JUCE_QNX
+ #include "native/juce_CommonFile_linux.cpp"
+ #include "native/juce_Files_linux.cpp"
+ #include "native/juce_Network_linux.cpp"
+ #if JUCE_USE_CURL
+  #include "native/juce_Network_curl.cpp"
+ #endif
+ #if JUCE_INTEL
+  #include "native/juce_SharedCode_intel.h"
+ #endif
  #include "native/juce_SystemStats_linux.cpp"
  #include "native/juce_Threads_linux.cpp"
  #include "native/juce_PlatformTimer_generic.cpp"

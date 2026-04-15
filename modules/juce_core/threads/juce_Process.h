@@ -152,7 +152,7 @@ public:
    #endif
 
     //==============================================================================
-   #if JUCE_MAC || JUCE_LINUX || JUCE_BSD || DOXYGEN
+   #if JUCE_MAC || JUCE_LINUX || JUCE_BSD || JUCE_QNX || DOXYGEN
     /** UNIX ONLY - Attempts to use setrlimit to change the maximum number of file
         handles that the app can open. Pass 0 or less as the parameter to mean
         'infinite'. Returns true if it succeeds.

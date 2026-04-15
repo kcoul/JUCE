@@ -110,7 +110,7 @@ JUCE_BEGIN_IGNORE_WARNINGS_MSVC (4514 4245 4100)
  #include <signal.h>
 #endif
 
-#if JUCE_LINUX || JUCE_BSD
+#if JUCE_LINUX || JUCE_BSD || JUCE_QNX
  #include <cstring>
  #include <signal.h>
 
