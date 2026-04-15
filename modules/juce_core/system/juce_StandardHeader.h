@@ -112,6 +112,7 @@ JUCE_BEGIN_IGNORE_WARNINGS_MSVC (4514 4245 4100)
 
 #if JUCE_LINUX || JUCE_BSD || JUCE_QNX
  #include <cstring>
+ #include <strings.h>
  #include <signal.h>
 
  #if __INTEL_COMPILER
