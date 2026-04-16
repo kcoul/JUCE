@@ -1,6 +1,20 @@
 #include <juce_gui_extra/juce_gui_extra.h>
 #include <juce_audio_devices/juce_audio_devices.h>
 
+namespace
+{
+    std::unique_ptr<juce::FileLogger> createAppLogger()
+    {
+        auto logFile = juce::File::getSpecialLocation (juce::File::currentApplicationFile)
+                           .getParentDirectory()
+                           .getChildFile ("JUCEQNXHelloWorld.log");
+
+        return std::make_unique<juce::FileLogger> (logFile,
+                                                   "JUCE QNX Hello World",
+                                                   512 * 1024);
+    }
+}
+
 class MainComponent final : public juce::Component
 {
 public:
@@ -13,16 +27,24 @@ public:
         const auto error = deviceManager.initialise (0, 2, nullptr, true);
 
         if (error.isEmpty())
+        {
             audioReady = true;
+            juce::Logger::writeToLog ("Audio device manager initialised successfully");
+        }
         else
+        {
             lastError = error;
+            juce::Logger::writeToLog ("Audio device manager initialisation failed: " + error);
+        }
 
         setOpaque (true);
         setSize (720, 360);
+        juce::Logger::writeToLog ("MainComponent created with size 720x360");
     }
 
     ~MainComponent() override
     {
+        juce::Logger::writeToLog ("MainComponent shutting down");
         deviceManager.removeAudioCallback (&player);
         player.setSource (nullptr);
         deviceManager.closeAudioDevice();
@@ -30,6 +52,12 @@ public:
 
     void paint (juce::Graphics& g) override
     {
+        static int paintCount = 0;
+        ++paintCount;
+
+        if (paintCount <= 5 || (paintCount % 60) == 0)
+            juce::Logger::writeToLog ("MainComponent::paint #" + juce::String (paintCount));
+
         g.fillAll (juce::Colour::fromRGB (243, 239, 231));
 
         auto panel = getLocalBounds().toFloat().reduced (24.0f);
@@ -95,6 +123,11 @@ public:
 
     void mouseUp (const juce::MouseEvent& event) override
     {
+        juce::Logger::writeToLog ("MainComponent::mouseUp at "
+                                  + juce::String (event.getPosition().x)
+                                  + ","
+                                  + juce::String (event.getPosition().y));
+
         if (getToggleBounds().contains (event.getPosition()))
             toggleTone();
     }
@@ -108,7 +141,10 @@ private:
     void toggleTone()
     {
         if (! audioReady)
+        {
+            juce::Logger::writeToLog ("toggleTone ignored because audio is not ready");
             return;
+        }
 
         if (! toneEnabled)
             deviceManager.addAudioCallback (&player);
@@ -116,6 +152,7 @@ private:
             deviceManager.removeAudioCallback (&player);
 
         toneEnabled = ! toneEnabled;
+        juce::Logger::writeToLog ("Tone toggled " + juce::String (toneEnabled ? "on" : "off"));
         repaint();
     }
 
@@ -138,16 +175,23 @@ public:
 
     void initialise (const juce::String&) override
     {
+        logger = createAppLogger();
+        juce::Logger::setCurrentLogger (logger.get());
+        juce::Logger::writeToLog ("Application initialise()");
         mainWindow = std::make_unique<MainWindow> (getApplicationName());
     }
 
     void shutdown() override
     {
+        juce::Logger::writeToLog ("Application shutdown()");
         mainWindow.reset();
+        juce::Logger::setCurrentLogger (nullptr);
+        logger.reset();
     }
 
     void systemRequestedQuit() override
     {
+        juce::Logger::writeToLog ("systemRequestedQuit()");
         quit();
     }
 
@@ -161,15 +205,18 @@ public:
                               juce::Colours::lightgrey,
                               juce::DocumentWindow::allButtons)
         {
+            juce::Logger::writeToLog ("MainWindow constructed");
             setUsingNativeTitleBar (true);
             setResizable (true, true);
             setContentOwned (new MainComponent(), true);
             centreWithSize (720, 360);
             setVisible (true);
+            juce::Logger::writeToLog ("MainWindow made visible");
         }
 
         void closeButtonPressed() override
         {
+            juce::Logger::writeToLog ("MainWindow::closeButtonPressed()");
             juce::JUCEApplication::getInstance()->systemRequestedQuit();
         }
 
@@ -179,6 +226,7 @@ public:
 
 private:
     std::unique_ptr<MainWindow> mainWindow;
+    std::unique_ptr<juce::FileLogger> logger;
 };
 
 START_JUCE_APPLICATION (QnxHelloWorldApplication)

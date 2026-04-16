@@ -7,6 +7,11 @@ namespace juce
 
 namespace
 {
+    void logQnxWindowing (const String& message)
+    {
+        Logger::writeToLog ("[QNX Windowing] " + message);
+    }
+
     String& qnxClipboardStorage()
     {
         static String text;
@@ -33,23 +38,35 @@ namespace
               nativeWindow (reinterpret_cast<screen_window_t> (nativeWindowToAttachTo)),
               attachedExternally (nativeWindowToAttachTo)
         {
+            logQnxWindowing ("QnxComponentPeer ctor, attachedExternally=" + String (nativeWindow != nullptr ? "yes" : "no"));
             getNativeRealtimeModifiers = []() { return ModifierKeys::currentModifiers; };
 
             if (auto componentBounds = component.getBounds(); ! componentBounds.isEmpty())
                 bounds = componentBounds;
 
             if (nativeWindow != nullptr)
+            {
+                logQnxWindowing ("Using externally attached native window");
                 return;
+            }
 
             if (screen_create_context (&screenContext, SCREEN_APPLICATION_CONTEXT) != 0)
+            {
+                logQnxWindowing ("screen_create_context failed");
                 return;
+            }
+
+            logQnxWindowing ("screen_create_context succeeded");
 
             if (screen_create_window (&nativeWindow, screenContext) != 0)
             {
+                logQnxWindowing ("screen_create_window failed");
                 screen_destroy_context (screenContext);
                 screenContext = nullptr;
                 return;
             }
+
+            logQnxWindowing ("screen_create_window succeeded");
 
             const int usage = SCREEN_USAGE_NATIVE | SCREEN_USAGE_READ | SCREEN_USAGE_WRITE
                             | SCREEN_USAGE_OPENGL_ES2 | SCREEN_USAGE_OPENGL_ES3;
@@ -63,10 +80,13 @@ namespace
             screen_set_window_property_iv (nativeWindow, SCREEN_PROPERTY_TRANSPARENCY, &transparency);
 
             updateWindowState();
+            repaintTimer.startTimerHz (60);
+            logQnxWindowing ("Started repaint timer at 60 Hz");
         }
 
         ~QnxComponentPeer() override
         {
+            logQnxWindowing ("QnxComponentPeer dtor");
             if (ownsWindow())
             {
                 destroyWindowBuffers();
@@ -83,6 +103,7 @@ namespace
         void setVisible (bool shouldBeVisible) override
         {
             isVisible = shouldBeVisible;
+            logQnxWindowing ("setVisible(" + String (shouldBeVisible ? "true" : "false") + ")");
             updateWindowState();
 
             if (shouldBeVisible)
@@ -95,6 +116,7 @@ namespace
             bounds = newBounds.withSize (jmax (1, newBounds.getWidth()),
                                          jmax (1, newBounds.getHeight()));
             fullScreen = isNowFullScreen;
+            logQnxWindowing ("setBounds to " + bounds.toString() + ", fullscreen=" + String (fullScreen ? "true" : "false"));
             updateWindowState();
             handleMovedOrResized();
             repaint (component.getLocalBounds());
@@ -150,6 +172,18 @@ namespace
         void repaint (const Rectangle<int>& area) override
         {
             pendingRepaintArea = pendingRepaintArea.getUnion (area);
+
+            if (pendingRepaintArea == area)
+                logQnxWindowing ("Queued repaint for " + area.toString());
+
+            if (isVisible
+                && ! minimised
+                && ! isPerformingRepaint
+                && MessageManager::getInstance()->currentThreadHasLockedMessageManager())
+            {
+                logQnxWindowing ("Flushing repaint immediately on message thread");
+                performAnyPendingRepaintsNow();
+            }
         }
 
         void performAnyPendingRepaintsNow() override
@@ -157,10 +191,15 @@ namespace
             if (pendingRepaintArea.isEmpty())
                 return;
 
+            const ScopedValueSetter<bool> repaintSetter (isPerformingRepaint, true);
+
             auto imageBounds = bounds.withZeroOrigin();
 
             if (imageBounds.isEmpty() || ! ensureWindowReady())
+            {
+                logQnxWindowing ("Skipping repaint, imageBounds=" + imageBounds.toString());
                 return;
+            }
 
             Image temp (Image::ARGB,
                         imageBounds.getWidth(),
@@ -180,10 +219,26 @@ namespace
     private:
         bool ownsWindow() const noexcept                                  { return attachedExternally == nullptr; }
 
+        void dispatchDeferredRepaints()
+        {
+            if (! isVisible || minimised || pendingRepaintArea.isEmpty())
+                return;
+
+            ++repaintDispatchCount;
+
+            if (repaintDispatchCount <= 5 || (repaintDispatchCount % 60) == 0)
+                logQnxWindowing ("Dispatching repaint #" + String (repaintDispatchCount));
+
+            performAnyPendingRepaintsNow();
+        }
+
         bool ensureWindowReady()
         {
             if (nativeWindow == nullptr)
+            {
+                logQnxWindowing ("ensureWindowReady failed: nativeWindow is null");
                 return false;
+            }
 
             const auto requestedSize = Point<int> (bounds.getWidth(), bounds.getHeight());
 
@@ -201,9 +256,15 @@ namespace
             screen_set_window_property_iv (nativeWindow, SCREEN_PROPERTY_BUFFER_SIZE, size);
 
             if (screen_create_window_buffers (nativeWindow, 1) != 0)
+            {
+                logQnxWindowing ("screen_create_window_buffers failed for size "
+                                 + String (bufferSize.x) + "x" + String (bufferSize.y));
                 return false;
+            }
 
             windowBuffersCreated = true;
+            logQnxWindowing ("screen_create_window_buffers succeeded for size "
+                             + String (bufferSize.x) + "x" + String (bufferSize.y));
             return true;
         }
 
@@ -211,6 +272,7 @@ namespace
         {
             if (windowBuffersCreated && nativeWindow != nullptr)
             {
+                logQnxWindowing ("Destroying Screen window buffers");
                 screen_destroy_window_buffers (nativeWindow);
                 windowBuffersCreated = false;
             }
@@ -228,6 +290,11 @@ namespace
             screen_set_window_property_iv (nativeWindow, SCREEN_PROPERTY_POSITION, position);
             screen_set_window_property_iv (nativeWindow, SCREEN_PROPERTY_SIZE, size);
             screen_set_window_property_iv (nativeWindow, SCREEN_PROPERTY_VISIBLE, &visible);
+
+            logQnxWindowing ("updateWindowState position="
+                             + String (position[0]) + "," + String (position[1])
+                             + " size=" + String (size[0]) + "x" + String (size[1])
+                             + " visible=" + String (visible));
         }
 
         void present (const Image& image, Rectangle<int> imageBounds)
@@ -235,7 +302,10 @@ namespace
             screen_buffer_t buffer = nullptr;
 
             if (screen_dequeue_window_render_buffer (&buffer, nativeWindow, 0) != 0 || buffer == nullptr)
+            {
+                logQnxWindowing ("screen_dequeue_window_render_buffer failed");
                 return;
+            }
 
             void* pointer = nullptr;
             int stride = 0;
@@ -245,6 +315,7 @@ namespace
                 || pointer == nullptr
                 || stride <= 0)
             {
+                logQnxWindowing ("Failed to query Screen buffer pointer/stride");
                 return;
             }
 
@@ -258,7 +329,20 @@ namespace
             }
 
             const int dirtyRect[4] = { 0, 0, imageBounds.getWidth(), imageBounds.getHeight() };
-            screen_post_window (nativeWindow, buffer, 1, dirtyRect, 0);
+            const auto postResult = screen_post_window (nativeWindow, buffer, 1, dirtyRect, 0);
+
+            ++presentCount;
+
+            if (postResult != 0)
+            {
+                logQnxWindowing ("screen_post_window failed");
+                return;
+            }
+
+            if (presentCount <= 5 || (presentCount % 60) == 0)
+                logQnxWindowing ("Presented frame #" + String (presentCount)
+                                 + " size=" + String (imageBounds.getWidth()) + "x" + String (imageBounds.getHeight())
+                                 + " stride=" + String (stride));
         }
 
         Rectangle<int> bounds { component.getBounds().isEmpty() ? Rectangle<int> (0, 0, 1, 1)
@@ -275,7 +359,11 @@ namespace
         bool fullScreen = false;
         bool focused = false;
         bool isAlwaysOnTop = false;
+        bool isPerformingRepaint = false;
         bool windowBuffersCreated = false;
+        int repaintDispatchCount = 0;
+        int presentCount = 0;
+        TimedCallback repaintTimer { [this]() { dispatchDeferredRepaints(); } };
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (QnxComponentPeer)
     };
