@@ -7,8 +7,11 @@ TARGET="${1:-12.2.0,gcc_ntoaarch64le}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")"/../.. && pwd)"
 TARGET_DIR="${TARGET//,/_}"
 BUILD_DIR="$ROOT/build/qnx_hello_world/$TARGET_DIR"
+GENERATED_HEADER="$BUILD_DIR/GeneratedBuildVersion.h"
 
 mkdir -p "$BUILD_DIR"
+
+cmake -DROOT="$ROOT" -DOUTPUT_HEADER="$GENERATED_HEADER" -P "$ROOT/extras/QNXHelloWorld/cmake/GenerateBuildVersion.cmake"
 
 COMMON=(
   "-V${TARGET}"
@@ -21,6 +24,7 @@ COMMON=(
   -DJUCE_USE_FONTCONFIG=0
   -I"$ROOT"
   -I"$ROOT/modules"
+  -I"$BUILD_DIR"
 )
 
 q++ "${COMMON[@]}" -c "$ROOT/modules/juce_core/juce_core.cpp" -o "$BUILD_DIR/juce_core.o"

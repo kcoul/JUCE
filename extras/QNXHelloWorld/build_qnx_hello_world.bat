@@ -11,10 +11,13 @@ set ROOT=%~dp0..\..
 for %%I in ("%ROOT%") do set ROOT=%%~fI
 set TARGET_DIR=%TARGET:,=_%
 set BUILD_DIR=%ROOT%\build\qnx_hello_world\%TARGET_DIR%
+set GENERATED_HEADER=%BUILD_DIR%\GeneratedBuildVersion.h
 
 if not exist "%BUILD_DIR%" mkdir "%BUILD_DIR%"
 
-set COMMON=-V%TARGET% -std=gnu++17 -DJUCE_GLOBAL_MODULE_SETTINGS_INCLUDED=1 -DJUCE_USE_CURL=0 -DJUCE_WEB_BROWSER=0 -DJUCE_JACK=0 -DJUCE_ALSA=1 -DJUCE_USE_FONTCONFIG=0 -I"%ROOT%" -I"%ROOT%\modules"
+cmake -DROOT="%ROOT%" -DOUTPUT_HEADER="%GENERATED_HEADER%" -P "%ROOT%\extras\QNXHelloWorld\cmake\GenerateBuildVersion.cmake" || exit /b 1
+
+set COMMON=-V%TARGET% -std=gnu++17 -DJUCE_GLOBAL_MODULE_SETTINGS_INCLUDED=1 -DJUCE_USE_CURL=0 -DJUCE_WEB_BROWSER=0 -DJUCE_JACK=0 -DJUCE_ALSA=1 -DJUCE_USE_FONTCONFIG=0 -I"%ROOT%" -I"%ROOT%\modules" -I"%BUILD_DIR%"
 
 q++ %COMMON% -c "%ROOT%\modules\juce_core\juce_core.cpp" -o "%BUILD_DIR%\juce_core.o" || exit /b 1
 q++ %COMMON% -c "%ROOT%\modules\juce_core\juce_core_CompilationTime.cpp" -o "%BUILD_DIR%\juce_core_CompilationTime.o" || exit /b 1

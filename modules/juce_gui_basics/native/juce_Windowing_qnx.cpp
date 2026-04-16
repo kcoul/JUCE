@@ -1,6 +1,10 @@
 #include <screen/screen.h>
 
 #include <cstring>
+#include <functional>
+#include <map>
+#include <mutex>
+#include <vector>
 
 namespace juce
 {
@@ -12,10 +16,87 @@ namespace
         Logger::writeToLog ("[QNX Windowing] " + message);
     }
 
+    const char* qnxScreenEventTypeToString (int eventType) noexcept
+    {
+        switch (eventType)
+        {
+            case SCREEN_EVENT_NONE:            return "NONE";
+            case SCREEN_EVENT_CREATE:          return "CREATE";
+            case SCREEN_EVENT_PROPERTY:        return "PROPERTY";
+            case SCREEN_EVENT_CLOSE:           return "CLOSE";
+            case SCREEN_EVENT_INPUT:           return "INPUT";
+            case SCREEN_EVENT_JOG:             return "JOG";
+            case SCREEN_EVENT_POINTER:         return "POINTER";
+            case SCREEN_EVENT_KEYBOARD:        return "KEYBOARD";
+            case SCREEN_EVENT_USER:            return "USER";
+            case SCREEN_EVENT_POST:            return "POST";
+            case SCREEN_EVENT_DISPLAY:         return "DISPLAY";
+            case SCREEN_EVENT_IDLE:            return "IDLE";
+            case SCREEN_EVENT_UNREALIZE:       return "UNREALIZE";
+            case SCREEN_EVENT_GAMEPAD:         return "GAMEPAD";
+            case SCREEN_EVENT_JOYSTICK:        return "JOYSTICK";
+            case SCREEN_EVENT_INPUT_CONTROL:   return "INPUT_CONTROL";
+            case SCREEN_EVENT_GESTURE:         return "GESTURE";
+            case SCREEN_EVENT_MANAGER:         return "MANAGER";
+            case SCREEN_EVENT_MTOUCH_PRETOUCH: return "MTOUCH_PRETOUCH";
+            case SCREEN_EVENT_MTOUCH_TOUCH:    return "MTOUCH_TOUCH";
+            case SCREEN_EVENT_MTOUCH_MOVE:     return "MTOUCH_MOVE";
+            case SCREEN_EVENT_MTOUCH_RELEASE:  return "MTOUCH_RELEASE";
+            default:                           return "UNKNOWN";
+        }
+    }
+
     String& qnxClipboardStorage()
     {
         static String text;
         return text;
+    }
+
+    String getWindowPropertyString (screen_window_t window, int property, int maxLen = 256)
+    {
+        if (window == nullptr || maxLen <= 1)
+            return {};
+
+        HeapBlock<char> buffer ((size_t) maxLen, true);
+
+        if (screen_get_window_property_cv (window, property, maxLen, buffer.getData()) != 0)
+            return {};
+
+        return String (buffer.getData());
+    }
+
+    String getScreenWindowPropertyName (int property)
+    {
+        switch (property)
+        {
+            case SCREEN_PROPERTY_MANAGER_STRING: return "MANAGER_STRING";
+            case SCREEN_PROPERTY_ID_STRING:      return "ID_STRING";
+            case SCREEN_PROPERTY_GROUP:          return "GROUP";
+            case SCREEN_PROPERTY_PARENT:         return "PARENT";
+            case SCREEN_PROPERTY_FOCUS:          return "FOCUS";
+            case SCREEN_PROPERTY_POINTER_FOCUS:  return "POINTER_FOCUS";
+            case SCREEN_PROPERTY_POSITION:       return "POSITION";
+            case SCREEN_PROPERTY_SIZE:           return "SIZE";
+            case SCREEN_PROPERTY_VISIBLE:        return "VISIBLE";
+            case SCREEN_PROPERTY_ZORDER:         return "ZORDER";
+            case SCREEN_PROPERTY_DISPLAY:        return "DISPLAY";
+            case SCREEN_PROPERTY_TYPE:           return "TYPE";
+            case SCREEN_PROPERTY_SENSITIVITY:    return "SENSITIVITY";
+            default:                             return String (property);
+        }
+    }
+
+    String getEventUserDataString (screen_event_t event, int maxLen = 256)
+    {
+        if (event == nullptr || maxLen <= 1)
+            return {};
+
+        HeapBlock<char> buffer ((size_t) maxLen, true);
+
+        if (screen_get_event_property_cv (event, SCREEN_PROPERTY_USER_DATA, maxLen, buffer.getData()) != 0)
+            return {};
+
+        return String (buffer.getData());
     }
 
     Point<float>& qnxMousePosition()
@@ -30,6 +111,297 @@ namespace
         return enabled;
     }
 
+    ModifierKeys qnxModifiersFromButtons (int buttons)
+    {
+        auto mods = ModifierKeys::getCurrentModifiersRealtime().withoutMouseButtons();
+
+        if ((buttons & SCREEN_LEFT_MOUSE_BUTTON) != 0)   mods = mods.withFlags (ModifierKeys::leftButtonModifier);
+        if ((buttons & SCREEN_MIDDLE_MOUSE_BUTTON) != 0) mods = mods.withFlags (ModifierKeys::middleButtonModifier);
+        if ((buttons & SCREEN_RIGHT_MOUSE_BUTTON) != 0)  mods = mods.withFlags (ModifierKeys::rightButtonModifier);
+
+        return mods;
+    }
+
+    struct PeerState
+    {
+        std::atomic<class QnxComponentPeer*> peer { nullptr };
+        std::atomic<bool> alive { true };
+        std::function<void(Point<int>, int, int)> handlePointerEvent;
+        std::function<void(Point<int>, bool)> handleTouchEvent;
+    };
+
+    class SharedQnxScreenEventThread final : public Thread
+    {
+    public:
+        explicit SharedQnxScreenEventThread (screen_context_t contextIn)
+            : Thread ("JUCE QNX Shared Screen Events"),
+              context (contextIn)
+        {
+        }
+
+        void registerWindow (screen_window_t window, std::shared_ptr<PeerState> state)
+        {
+            const std::scoped_lock lock (mutex);
+            registrations[window] = state;
+            logQnxWindowing ("Registered window with shared event thread");
+        }
+
+        void unregisterWindow (screen_window_t window)
+        {
+            const std::scoped_lock lock (mutex);
+            registrations.erase (window);
+            logQnxWindowing ("Unregistered window from shared event thread");
+        }
+
+        void run() override
+        {
+            if (context == nullptr)
+                return;
+
+            screen_event_t event = nullptr;
+
+            if (screen_create_event (&event) != 0 || event == nullptr)
+            {
+                logQnxWindowing ("screen_create_event failed");
+                return;
+            }
+
+            while (! threadShouldExit())
+            {
+                if (screen_get_event (context, event, ~0ULL) != 0)
+                {
+                    if (++getEventErrorCount <= 10)
+                        logQnxWindowing ("screen_get_event failed errno=" + String (errno));
+
+                    continue;
+                }
+
+                int eventType = SCREEN_EVENT_NONE;
+                screen_get_event_property_iv (event, SCREEN_PROPERTY_TYPE, &eventType);
+
+                if (eventType == SCREEN_EVENT_NONE)
+                    continue;
+
+                screen_window_t targetWindow = nullptr;
+                screen_get_event_property_pv (event, SCREEN_PROPERTY_WINDOW, reinterpret_cast<void**> (&targetWindow));
+
+                std::shared_ptr<PeerState> state;
+
+                {
+                    const std::scoped_lock lock (mutex);
+
+                    if (auto it = registrations.find (targetWindow); it != registrations.end())
+                        state = it->second.lock();
+
+                    if (state == nullptr && registrations.size() == 1)
+                    {
+                        if (auto only = registrations.begin()->second.lock())
+                            state = only;
+                    }
+                }
+
+                ++receivedEventCount;
+
+                if (receivedEventCount <= 25 || (receivedEventCount % 100) == 0)
+                    logQnxWindowing ("Screen event #"
+                                     + String (receivedEventCount)
+                                     + " type="
+                                     + qnxScreenEventTypeToString (eventType)
+                                     + " objectType="
+                                     + String (getObjectType (event))
+                                     + " targetRegistered="
+                                     + String (state != nullptr ? "yes" : "no"));
+
+                if (eventType == SCREEN_EVENT_PROPERTY && (receivedEventCount <= 50 || state != nullptr))
+                {
+                    int property = 0;
+                    int subtype = 0;
+                    screen_get_event_property_iv (event, SCREEN_PROPERTY_NAME, &property);
+                    screen_get_event_property_iv (event, SCREEN_PROPERTY_SUBTYPE, &subtype);
+
+                    logQnxWindowing ("Property event pname="
+                                     + getScreenWindowPropertyName (property)
+                                     + " subtype="
+                                     + String (subtype)
+                                     + " targetRegistered="
+                                     + String (state != nullptr ? "yes" : "no"));
+                }
+
+                if ((eventType == SCREEN_EVENT_MANAGER || eventType == SCREEN_EVENT_USER)
+                    && (receivedEventCount <= 100 || state != nullptr))
+                {
+                    int subtype = 0;
+                    screen_get_event_property_iv (event, SCREEN_PROPERTY_SUBTYPE, &subtype);
+                    const auto userData = getEventUserDataString (event);
+
+                    logQnxWindowing (String (eventType == SCREEN_EVENT_MANAGER ? "Manager" : "User")
+                                     + " event subtype="
+                                     + String (subtype)
+                                     + " userData="
+                                     + (userData.isNotEmpty() ? userData : "<empty>")
+                                     + " targetRegistered="
+                                     + String (state != nullptr ? "yes" : "no"));
+                }
+
+                if (state == nullptr || ! state->alive)
+                    continue;
+
+                if (eventType == SCREEN_EVENT_POINTER)
+                {
+                    int position[2] { 0, 0 };
+                    int buttons = 0;
+                    int wheelTicks = 0;
+
+                    screen_get_event_property_iv (event, SCREEN_PROPERTY_POSITION, position);
+                    screen_get_event_property_iv (event, SCREEN_PROPERTY_BUTTONS, &buttons);
+                    screen_get_event_property_iv (event, SCREEN_PROPERTY_MOUSE_WHEEL, &wheelTicks);
+
+                    const auto weakState = std::weak_ptr<PeerState> { state };
+                    MessageManager::callAsync ([weakState, positionX = position[0], positionY = position[1], buttons, wheelTicks]
+                    {
+                        if (auto locked = weakState.lock())
+                        {
+                            if (! locked->alive)
+                                return;
+
+                            if (locked->handlePointerEvent != nullptr)
+                                locked->handlePointerEvent ({ positionX, positionY }, buttons, wheelTicks);
+                        }
+                    });
+                }
+                else if (eventType == SCREEN_EVENT_MTOUCH_TOUCH
+                      || eventType == SCREEN_EVENT_MTOUCH_MOVE
+                      || eventType == SCREEN_EVENT_MTOUCH_RELEASE)
+                {
+                    int position[2] { 0, 0 };
+                    screen_get_event_property_iv (event, SCREEN_PROPERTY_POSITION, position);
+
+                    const bool isTouchDown = eventType != SCREEN_EVENT_MTOUCH_RELEASE;
+                    const auto weakState = std::weak_ptr<PeerState> { state };
+                    MessageManager::callAsync ([weakState, positionX = position[0], positionY = position[1], isTouchDown]
+                    {
+                        if (auto locked = weakState.lock())
+                        {
+                            if (! locked->alive)
+                                return;
+
+                            if (locked->handleTouchEvent != nullptr)
+                                locked->handleTouchEvent ({ positionX, positionY }, isTouchDown);
+                        }
+                    });
+                }
+                else if (receivedEventCount <= 25)
+                {
+                    logQnxWindowing ("Unhandled Screen event type for registered window: "
+                                     + String (qnxScreenEventTypeToString (eventType)));
+                }
+            }
+
+            screen_destroy_event (event);
+        }
+
+    private:
+        static int getObjectType (screen_event_t event)
+        {
+            int objectType = 0;
+            screen_get_event_property_iv (event, SCREEN_PROPERTY_OBJECT_TYPE, &objectType);
+            return objectType;
+        }
+
+        screen_context_t context = nullptr;
+        std::mutex mutex;
+        std::map<screen_window_t, std::weak_ptr<PeerState>> registrations;
+        int receivedEventCount = 0;
+        int getEventErrorCount = 0;
+    };
+
+    struct SharedQnxScreenContext
+    {
+        screen_context_t context = nullptr;
+        int referenceCount = 0;
+        std::mutex mutex;
+        std::unique_ptr<SharedQnxScreenEventThread> eventThread;
+    };
+
+    SharedQnxScreenContext& getSharedQnxScreenContext()
+    {
+        static SharedQnxScreenContext sharedContext;
+        return sharedContext;
+    }
+
+    screen_context_t acquireSharedQnxScreenContext()
+    {
+        auto& shared = getSharedQnxScreenContext();
+        const std::scoped_lock lock (shared.mutex);
+
+        if (shared.context == nullptr)
+        {
+            if (screen_create_context (&shared.context, SCREEN_APPLICATION_CONTEXT) != 0)
+            {
+                logQnxWindowing ("screen_create_context failed");
+                shared.context = nullptr;
+                return nullptr;
+            }
+
+            logQnxWindowing ("screen_create_context succeeded (shared)");
+            shared.eventThread = std::make_unique<SharedQnxScreenEventThread> (shared.context);
+            shared.eventThread->startThread();
+            logQnxWindowing ("Started shared Screen event thread");
+        }
+
+        ++shared.referenceCount;
+        logQnxWindowing ("Acquired shared Screen context, refCount=" + String (shared.referenceCount));
+        return shared.context;
+    }
+
+    void releaseSharedQnxScreenContext()
+    {
+        auto& shared = getSharedQnxScreenContext();
+        const std::scoped_lock lock (shared.mutex);
+
+        if (shared.context == nullptr)
+            return;
+
+        shared.referenceCount = jmax (0, shared.referenceCount - 1);
+        logQnxWindowing ("Released shared Screen context, refCount=" + String (shared.referenceCount));
+    }
+
+    void registerSharedQnxScreenWindow (screen_window_t window, std::shared_ptr<PeerState> state)
+    {
+        auto& shared = getSharedQnxScreenContext();
+        const std::scoped_lock lock (shared.mutex);
+
+        if (shared.eventThread != nullptr)
+            shared.eventThread->registerWindow (window, std::move (state));
+    }
+
+    void unregisterSharedQnxScreenWindow (screen_window_t window)
+    {
+        auto& shared = getSharedQnxScreenContext();
+        const std::scoped_lock lock (shared.mutex);
+
+        if (shared.eventThread != nullptr)
+            shared.eventThread->unregisterWindow (window);
+    }
+
+    screen_display_t getPrimaryQnxScreenDisplay (screen_context_t context)
+    {
+        if (context == nullptr)
+            return nullptr;
+
+        int displayCount = 0;
+
+        if (screen_get_context_property_iv (context, SCREEN_PROPERTY_DISPLAY_COUNT, &displayCount) != 0 || displayCount <= 0)
+            return nullptr;
+
+        std::vector<screen_display_t> displays ((size_t) displayCount);
+
+        if (screen_get_context_property_pv (context, SCREEN_PROPERTY_DISPLAYS, reinterpret_cast<void**> (displays.data())) != 0)
+            return nullptr;
+
+        return displays.front();
+    }
+
     class QnxComponentPeer final : public ComponentPeer
     {
     public:
@@ -40,6 +412,15 @@ namespace
         {
             logQnxWindowing ("QnxComponentPeer ctor, attachedExternally=" + String (nativeWindow != nullptr ? "yes" : "no"));
             getNativeRealtimeModifiers = []() { return ModifierKeys::currentModifiers; };
+            peerState->peer = this;
+            peerState->handlePointerEvent = [this] (Point<int> position, int buttons, int wheelTicks)
+            {
+                handlePointerEvent (position, buttons, wheelTicks);
+            };
+            peerState->handleTouchEvent = [this] (Point<int> position, bool isTouchDown)
+            {
+                handleTouchEvent (position, isTouchDown);
+            };
 
             if (auto componentBounds = component.getBounds(); ! componentBounds.isEmpty())
                 bounds = componentBounds;
@@ -50,52 +431,82 @@ namespace
                 return;
             }
 
-            if (screen_create_context (&screenContext, SCREEN_APPLICATION_CONTEXT) != 0)
-            {
-                logQnxWindowing ("screen_create_context failed");
+            screenContext = acquireSharedQnxScreenContext();
+
+            if (screenContext == nullptr)
                 return;
-            }
 
-            logQnxWindowing ("screen_create_context succeeded");
+            usingSharedContext = true;
 
-            if (screen_create_window (&nativeWindow, screenContext) != 0)
+            const auto windowType = SCREEN_APPLICATION_WINDOW | SCREEN_ROOT_WINDOW;
+
+            if (screen_create_window_type (&nativeWindow, screenContext, windowType) != 0)
             {
-                logQnxWindowing ("screen_create_window failed");
-                screen_destroy_context (screenContext);
+                logQnxWindowing ("screen_create_window_type failed, errno=" + String (errno));
+                releaseSharedQnxScreenContext();
                 screenContext = nullptr;
+                usingSharedContext = false;
                 return;
             }
 
-            logQnxWindowing ("screen_create_window succeeded");
+            logQnxWindowing ("screen_create_window_type succeeded type=SCREEN_APPLICATION_WINDOW|SCREEN_ROOT_WINDOW");
 
             const int usage = SCREEN_USAGE_NATIVE | SCREEN_USAGE_READ | SCREEN_USAGE_WRITE
                             | SCREEN_USAGE_OPENGL_ES2 | SCREEN_USAGE_OPENGL_ES3;
             screen_set_window_property_iv (nativeWindow, SCREEN_PROPERTY_USAGE, &usage);
 
-            const int format = SCREEN_FORMAT_BGRA8888;
+            const int format = SCREEN_FORMAT_RGBA8888;
             screen_set_window_property_iv (nativeWindow, SCREEN_PROPERTY_FORMAT, &format);
 
             const int transparency = component.isOpaque() ? SCREEN_TRANSPARENCY_NONE
                                                           : SCREEN_TRANSPARENCY_SOURCE_OVER;
             screen_set_window_property_iv (nativeWindow, SCREEN_PROPERTY_TRANSPARENCY, &transparency);
 
+            const int sensitivity = SCREEN_SENSITIVITY_ALWAYS;
+            screen_set_window_property_iv (nativeWindow, SCREEN_PROPERTY_SENSITIVITY, &sensitivity);
+
+            const auto idString = "JUCEQNXHelloWorld";
+            if (screen_set_window_property_cv (nativeWindow,
+                                               SCREEN_PROPERTY_ID_STRING,
+                                               (int) std::strlen (idString) + 1,
+                                               idString) != 0)
+            {
+                logQnxWindowing ("screen_set_window_property_cv(SCREEN_PROPERTY_ID_STRING) failed, errno=" + String (errno));
+            }
+
+            attachWindowToPrimaryDisplay();
+            logQnxWindowing ("Embedded fullscreen mode active; skipping Screen window-manager/group setup");
+            createEmbeddedInputSessions();
             updateWindowState();
+            registerSharedQnxScreenWindow (nativeWindow, peerState);
             repaintTimer.startTimerHz (60);
             logQnxWindowing ("Started repaint timer at 60 Hz");
         }
 
         ~QnxComponentPeer() override
         {
+            peerState->peer = nullptr;
+            peerState->alive = false;
+            peerState->handlePointerEvent = {};
+            peerState->handleTouchEvent = {};
             logQnxWindowing ("QnxComponentPeer dtor");
             if (ownsWindow())
             {
+                unregisterSharedQnxScreenWindow (nativeWindow);
+                destroyEmbeddedInputSessions();
+                destroyWindowGroupHandle();
                 destroyWindowBuffers();
 
                 if (nativeWindow != nullptr)
                     screen_destroy_window (nativeWindow);
 
                 if (screenContext != nullptr)
-                    screen_destroy_context (screenContext);
+                {
+                    if (usingSharedContext)
+                        releaseSharedQnxScreenContext();
+                    else
+                        screen_destroy_context (screenContext);
+                }
             }
         }
 
@@ -107,7 +518,9 @@ namespace
             updateWindowState();
 
             if (shouldBeVisible)
+            {
                 repaint (component.getLocalBounds());
+            }
         }
         void setTitle (const String& newTitle) override                    { title = newTitle; }
 
@@ -219,6 +632,108 @@ namespace
     private:
         bool ownsWindow() const noexcept                                  { return attachedExternally == nullptr; }
 
+        void attachWindowToPrimaryDisplay()
+        {
+            if (nativeWindow == nullptr || screenContext == nullptr)
+                return;
+
+            auto* display = getPrimaryQnxScreenDisplay (screenContext);
+
+            if (display == nullptr)
+            {
+                logQnxWindowing ("No primary display available for window attachment");
+                return;
+            }
+
+            auto* displayHandle = reinterpret_cast<void*> (display);
+
+            if (screen_set_window_property_pv (nativeWindow, SCREEN_PROPERTY_DISPLAY, &displayHandle) != 0)
+            {
+                logQnxWindowing ("screen_set_window_property_pv(SCREEN_PROPERTY_DISPLAY) failed");
+                return;
+            }
+
+            flushScreenContext ("attachWindowToPrimaryDisplay");
+
+            int windowManagerId = SCREEN_INVALID_ID;
+            int displaySize[2] { 0, 0 };
+            screen_get_display_property_iv (display, SCREEN_PROPERTY_WINDOW_MANAGER_ID, &windowManagerId);
+            screen_get_display_property_iv (display, SCREEN_PROPERTY_SIZE, displaySize);
+
+            logQnxWindowing ("Attached window to primary display size="
+                             + String (displaySize[0]) + "x" + String (displaySize[1])
+                             + " windowManagerId=" + String (windowManagerId));
+        }
+
+        void ensureWindowGroupCreated()
+        {
+            if (nativeWindow == nullptr)
+                return;
+
+            if (screen_create_window_group (nativeWindow, nullptr) != 0)
+            {
+                logQnxWindowing ("screen_create_window_group failed");
+                return;
+            }
+
+            screen_group_t group = nullptr;
+
+            if (screen_get_window_property_pv (nativeWindow, SCREEN_PROPERTY_GROUP, reinterpret_cast<void**> (&group)) != 0
+                || group == nullptr)
+            {
+                logQnxWindowing ("screen_get_window_property_pv(SCREEN_PROPERTY_GROUP) failed");
+                return;
+            }
+
+            windowGroup = group;
+
+            char groupName[64] = {};
+            const auto groupNameResult = screen_get_window_property_cv (nativeWindow,
+                                                                        SCREEN_PROPERTY_GROUP,
+                                                                        (int) sizeof (groupName),
+                                                                        groupName);
+
+            logQnxWindowing ("Window group created name="
+                             + String (groupNameResult == 0 && groupName[0] != '\0' ? groupName : "<unnamed>"));
+        }
+
+        void requestWindowGroupFocus()
+        {
+            if (windowGroup == nullptr || nativeWindow == nullptr)
+                return;
+
+            auto* windowHandle = reinterpret_cast<void*> (nativeWindow);
+
+            if (screen_set_group_property_pv (windowGroup, SCREEN_PROPERTY_FOCUS, &windowHandle) != 0)
+            {
+                logQnxWindowing ("screen_set_group_property_pv(SCREEN_PROPERTY_FOCUS) failed");
+                return;
+            }
+
+            flushScreenContext ("requestWindowGroupFocus");
+            logQnxWindowing ("Requested window-group focus");
+        }
+
+        void destroyWindowGroupHandle()
+        {
+            if (windowGroup != nullptr)
+            {
+                logQnxWindowing ("Destroying local window-group handle");
+                screen_destroy_group (windowGroup);
+                windowGroup = nullptr;
+            }
+        }
+
+        void logManagerString (const char* reason)
+        {
+            managerString = getWindowPropertyString (nativeWindow, SCREEN_PROPERTY_MANAGER_STRING, 256);
+
+            logQnxWindowing (String ("Manager string after ")
+                             + reason
+                             + "="
+                             + (managerString.isNotEmpty() ? managerString : "<empty>"));
+        }
+
         void dispatchDeferredRepaints()
         {
             if (! isVisible || minimised || pendingRepaintArea.isEmpty())
@@ -230,6 +745,240 @@ namespace
                 logQnxWindowing ("Dispatching repaint #" + String (repaintDispatchCount));
 
             performAnyPendingRepaintsNow();
+        }
+
+        void handlePointerEvent (Point<int> eventPosition, int buttons, int wheelTicks)
+        {
+            const auto localPos = globalToLocal (eventPosition.toFloat());
+            const auto mods = qnxModifiersFromButtons (buttons);
+
+            ModifierKeys::currentModifiers = mods;
+            qnxMousePosition() = eventPosition.toFloat();
+
+            if (++pointerEventCount <= 10 || (pointerEventCount % 50) == 0)
+                logQnxWindowing ("Pointer event pos="
+                                 + String (eventPosition.x) + "," + String (eventPosition.y)
+                                 + " local=" + String (roundToInt (localPos.x)) + "," + String (roundToInt (localPos.y))
+                                 + " buttons=" + String (buttons)
+                                 + " wheel=" + String (wheelTicks));
+
+            handleMouseEvent (MouseInputSource::InputSourceType::mouse,
+                              localPos,
+                              mods,
+                              0.0f,
+                              0.0f,
+                              Time::currentTimeMillis(),
+                              {},
+                              0);
+
+            if (wheelTicks != 0)
+            {
+                MouseWheelDetails wheel;
+                wheel.deltaX = 0.0f;
+                wheel.deltaY = (float) wheelTicks / 3.0f;
+                wheel.isReversed = false;
+                wheel.isSmooth = false;
+                wheel.isInertial = false;
+
+                handleMouseWheel (MouseInputSource::InputSourceType::mouse,
+                                  localPos,
+                                  Time::currentTimeMillis(),
+                                  wheel,
+                                  0);
+            }
+        }
+
+        void handleTouchEvent (Point<int> eventPosition, bool isTouchDown)
+        {
+            handlePointerEvent (eventPosition,
+                                isTouchDown ? SCREEN_LEFT_MOUSE_BUTTON : 0,
+                                0);
+        }
+
+        void createEmbeddedInputSessions()
+        {
+            if (screenContext == nullptr || nativeWindow == nullptr)
+                return;
+
+            auto* windowHandle = reinterpret_cast<void*> (nativeWindow);
+            auto* display = getPrimaryQnxScreenDisplay (screenContext);
+
+            if (screen_create_session_type (&pointerSession, screenContext, SCREEN_EVENT_POINTER) == 0)
+            {
+                if (screen_set_session_property_pv (pointerSession, SCREEN_PROPERTY_WINDOW, &windowHandle) == 0)
+                    logQnxWindowing ("Created embedded pointer session for root window");
+                else
+                    logQnxWindowing ("screen_set_session_property_pv(pointer, SCREEN_PROPERTY_WINDOW) failed, errno=" + String (errno));
+
+                attachEmbeddedSessionToPrimaryDisplay (pointerSession, display, "pointer");
+            }
+            else
+            {
+                logQnxWindowing ("screen_create_session_type(SCREEN_EVENT_POINTER) failed, errno=" + String (errno));
+            }
+
+            if (screen_create_session_type (&mtouchSession, screenContext, SCREEN_EVENT_MTOUCH_TOUCH) == 0)
+            {
+                logQnxWindowing ("Created embedded mtouch session for primary display");
+                attachEmbeddedSessionToPrimaryDisplay (mtouchSession, display, "mtouch");
+
+                const int mode = SCREEN_INPUT_MODE_RAW;
+                if (screen_set_session_property_iv (mtouchSession, SCREEN_PROPERTY_MODE, &mode) == 0)
+                    logQnxWindowing ("Set embedded mtouch session mode=SCREEN_INPUT_MODE_RAW");
+                else
+                    logQnxWindowing ("screen_set_session_property_iv(mtouch, SCREEN_PROPERTY_MODE) failed, errno=" + String (errno));
+            }
+            else
+            {
+                logQnxWindowing ("screen_create_session_type(SCREEN_EVENT_MTOUCH_TOUCH) failed, errno=" + String (errno));
+            }
+
+            updateEmbeddedInputSessions();
+            bindEmbeddedInputDevices();
+            flushScreenContext ("createEmbeddedInputSessions");
+        }
+
+        void attachEmbeddedSessionToPrimaryDisplay (screen_session_t session,
+                                                    screen_display_t display,
+                                                    const char* name)
+        {
+            if (session == nullptr || display == nullptr)
+                return;
+
+            auto* displayHandle = reinterpret_cast<void*> (display);
+
+            if (screen_set_session_property_pv (session, SCREEN_PROPERTY_DISPLAY, &displayHandle) == 0)
+                logQnxWindowing ("Attached embedded " + String (name) + " session to primary display");
+            else
+                logQnxWindowing ("screen_set_session_property_pv(" + String (name) + ", SCREEN_PROPERTY_DISPLAY) failed, errno=" + String (errno));
+        }
+
+        void updateEmbeddedInputSessions()
+        {
+            if (nativeWindow == nullptr)
+                return;
+
+            const int position[2] { 0, 0 };
+            const int size[2] { jmax (1, bounds.getWidth()), jmax (1, bounds.getHeight()) };
+            const int zOrder = 1000;
+            const int visible = isVisible ? 1 : 0;
+
+            auto updateSession = [this, &position, &size, &zOrder, &visible] (screen_session_t session,
+                                                                               const char* name,
+                                                                               bool shouldSetVisible)
+            {
+                if (session == nullptr)
+                    return;
+
+                if (screen_set_session_property_iv (session, SCREEN_PROPERTY_POSITION, position) != 0)
+                    logQnxWindowing ("screen_set_session_property_iv(" + String (name) + ", SCREEN_PROPERTY_POSITION) failed, errno=" + String (errno));
+
+                if (screen_set_session_property_iv (session, SCREEN_PROPERTY_SIZE, size) != 0)
+                    logQnxWindowing ("screen_set_session_property_iv(" + String (name) + ", SCREEN_PROPERTY_SIZE) failed, errno=" + String (errno));
+
+                if (screen_set_session_property_iv (session, SCREEN_PROPERTY_ZORDER, &zOrder) != 0)
+                    logQnxWindowing ("screen_set_session_property_iv(" + String (name) + ", SCREEN_PROPERTY_ZORDER) failed, errno=" + String (errno));
+
+                if (shouldSetVisible
+                    && screen_set_session_property_iv (session, SCREEN_PROPERTY_VISIBLE, &visible) != 0)
+                {
+                    logQnxWindowing ("screen_set_session_property_iv(" + String (name) + ", SCREEN_PROPERTY_VISIBLE) failed, errno=" + String (errno));
+                }
+            };
+
+            updateSession (pointerSession, "pointer", false);
+            updateSession (mtouchSession, "mtouch", true);
+
+            if (++sessionStateLogCount <= 10 || (sessionStateLogCount % 25) == 0)
+                logQnxWindowing ("Updated embedded input sessions size="
+                                 + String (size[0]) + "x" + String (size[1])
+                                 + " visible=" + String (visible));
+        }
+
+        void bindEmbeddedInputDevices()
+        {
+            if (screenContext == nullptr)
+                return;
+
+            int deviceCount = 0;
+
+            if (screen_get_context_property_iv (screenContext, SCREEN_PROPERTY_DEVICE_COUNT, &deviceCount) != 0 || deviceCount <= 0)
+            {
+                logQnxWindowing ("No Screen input devices available for embedded session binding");
+                return;
+            }
+
+            std::vector<screen_device_t> devices ((size_t) deviceCount);
+
+            if (screen_get_context_property_pv (screenContext, SCREEN_PROPERTY_DEVICES, reinterpret_cast<void**> (devices.data())) != 0)
+            {
+                logQnxWindowing ("screen_get_context_property_pv(SCREEN_PROPERTY_DEVICES) failed");
+                return;
+            }
+
+            for (auto device : devices)
+            {
+                if (device == nullptr)
+                    continue;
+
+                int deviceType = 0;
+                screen_get_device_property_iv (device, SCREEN_PROPERTY_TYPE, &deviceType);
+                logQnxWindowing ("Embedded input device type=" + String (deviceType));
+
+                if (pointerSession != nullptr && deviceType == SCREEN_EVENT_POINTER)
+                {
+                    auto* sessionHandle = reinterpret_cast<void*> (pointerSession);
+                    if (screen_set_device_property_pv (device, SCREEN_PROPERTY_SESSION, &sessionHandle) == 0)
+                        logQnxWindowing ("Bound pointer device to embedded pointer session");
+                    else
+                        logQnxWindowing ("screen_set_device_property_pv(pointer, SCREEN_PROPERTY_SESSION) failed, errno=" + String (errno));
+                }
+
+                if (mtouchSession != nullptr && deviceType == SCREEN_EVENT_MTOUCH_TOUCH)
+                {
+                    auto* sessionHandle = reinterpret_cast<void*> (mtouchSession);
+                    if (screen_set_device_property_pv (device, SCREEN_PROPERTY_SESSION, &sessionHandle) == 0)
+                        logQnxWindowing ("Bound mtouch device to embedded mtouch session");
+                    else
+                        logQnxWindowing ("screen_set_device_property_pv(mtouch, SCREEN_PROPERTY_SESSION) failed, errno=" + String (errno));
+                }
+            }
+        }
+
+        void destroyEmbeddedInputSessions()
+        {
+            if (pointerSession != nullptr)
+            {
+                logQnxWindowing ("Destroying embedded pointer session");
+                screen_destroy_session (pointerSession);
+                pointerSession = nullptr;
+            }
+
+            if (mtouchSession != nullptr)
+            {
+                logQnxWindowing ("Destroying embedded mtouch session");
+                screen_destroy_session (mtouchSession);
+                mtouchSession = nullptr;
+            }
+        }
+
+        void flushScreenContext (const char* reason) const
+        {
+            if (screenContext == nullptr)
+                return;
+
+            if (screen_flush_context (screenContext, 0) != 0)
+                logQnxWindowing ("screen_flush_context failed after " + String (reason));
+        }
+
+        static int getWindowId (screen_window_t window) noexcept
+        {
+            if (window == nullptr)
+                return -1;
+
+            int id = -1;
+            screen_get_window_property_iv (window, SCREEN_PROPERTY_ID, &id);
+            return id;
         }
 
         bool ensureWindowReady()
@@ -290,11 +1039,90 @@ namespace
             screen_set_window_property_iv (nativeWindow, SCREEN_PROPERTY_POSITION, position);
             screen_set_window_property_iv (nativeWindow, SCREEN_PROPERTY_SIZE, size);
             screen_set_window_property_iv (nativeWindow, SCREEN_PROPERTY_VISIBLE, &visible);
+            updateEmbeddedInputSessions();
+            flushScreenContext ("updateWindowState");
+
+            int hasFocus = 0;
+            int hasPointerFocus = 0;
+            int zOrder = 0;
+            int status = 0;
+            int type = 0;
+            int sensitivity = 0;
+            int ownerPid = -1;
+            screen_get_window_property_iv (nativeWindow, SCREEN_PROPERTY_FOCUS, &hasFocus);
+            screen_get_window_property_iv (nativeWindow, SCREEN_PROPERTY_POINTER_FOCUS, &hasPointerFocus);
+            screen_get_window_property_iv (nativeWindow, SCREEN_PROPERTY_ZORDER, &zOrder);
+            screen_get_window_property_iv (nativeWindow, SCREEN_PROPERTY_STATUS, &status);
+            screen_get_window_property_iv (nativeWindow, SCREEN_PROPERTY_TYPE, &type);
+            screen_get_window_property_iv (nativeWindow, SCREEN_PROPERTY_SENSITIVITY, &sensitivity);
+            screen_get_window_property_iv (nativeWindow, SCREEN_PROPERTY_OWNER_PID, &ownerPid);
+
+            if (lastLoggedStatus != status)
+            {
+                logQnxWindowing ("Window status transition " + String (lastLoggedStatus) + " -> " + String (status));
+                lastLoggedStatus = status;
+            }
+
+            const auto groupName = getWindowPropertyString (nativeWindow, SCREEN_PROPERTY_GROUP, 64);
+            const auto className = getWindowPropertyString (nativeWindow, SCREEN_PROPERTY_CLASS, 128);
+            const auto idName = getWindowPropertyString (nativeWindow, SCREEN_PROPERTY_ID, 128);
+            const auto idString = getWindowPropertyString (nativeWindow, SCREEN_PROPERTY_ID_STRING, 128);
+            const auto parentId = getWindowPropertyString (nativeWindow, SCREEN_PROPERTY_PARENT, 128);
+            if (managerString.isEmpty())
+                managerString = getWindowPropertyString (nativeWindow, SCREEN_PROPERTY_MANAGER_STRING, 256);
+
+            void* parent = nullptr;
+            void* display = nullptr;
+            void* contextFocus = nullptr;
+            void* contextPointerFocus = nullptr;
+            void* contextMTouchFocus = nullptr;
+            void* groupFocus = nullptr;
+            screen_get_window_property_pv (nativeWindow, SCREEN_PROPERTY_PARENT, &parent);
+            screen_get_window_property_pv (nativeWindow, SCREEN_PROPERTY_DISPLAY, &display);
+            if (screenContext != nullptr)
+            {
+                screen_get_context_property_pv (screenContext, SCREEN_PROPERTY_FOCUS, &contextFocus);
+                screen_get_context_property_pv (screenContext, SCREEN_PROPERTY_POINTER_FOCUS, &contextPointerFocus);
+                screen_get_context_property_pv (screenContext, SCREEN_PROPERTY_MTOUCH_FOCUS, &contextMTouchFocus);
+            }
+
+            if (windowGroup != nullptr)
+                screen_get_group_property_pv (windowGroup, SCREEN_PROPERTY_FOCUS, &groupFocus);
+
+            const auto ownWindowId = getWindowId (nativeWindow);
+            const auto contextFocusId = getWindowId (reinterpret_cast<screen_window_t> (contextFocus));
+            const auto contextPointerFocusId = getWindowId (reinterpret_cast<screen_window_t> (contextPointerFocus));
+            const auto contextMTouchFocusId = getWindowId (reinterpret_cast<screen_window_t> (contextMTouchFocus));
+            const auto groupFocusId = getWindowId (reinterpret_cast<screen_window_t> (groupFocus));
 
             logQnxWindowing ("updateWindowState position="
                              + String (position[0]) + "," + String (position[1])
                              + " size=" + String (size[0]) + "x" + String (size[1])
-                             + " visible=" + String (visible));
+                             + " visible=" + String (visible)
+                             + " focus=" + String (hasFocus)
+                             + " pointerFocus=" + String (hasPointerFocus)
+                             + " zOrder=" + String (zOrder)
+                             + " status=" + String (status)
+                             + " type=" + String (type)
+                             + " sensitivity=" + String (sensitivity)
+                             + " ownerPid=" + String (ownerPid)
+                             + " hasParent=" + String (parent != nullptr ? "yes" : "no")
+                             + " hasDisplay=" + String (display != nullptr ? "yes" : "no")
+                             + " contextFocusMatches=" + String (contextFocus == nativeWindow ? "yes" : "no")
+                             + " contextFocusId=" + String (contextFocusId)
+                             + " contextPointerFocusMatches=" + String (contextPointerFocus == nativeWindow ? "yes" : "no")
+                             + " contextPointerFocusId=" + String (contextPointerFocusId)
+                             + " contextMTouchFocusMatches=" + String (contextMTouchFocus == nativeWindow ? "yes" : "no")
+                             + " contextMTouchFocusId=" + String (contextMTouchFocusId)
+                             + " groupFocusMatches=" + String (groupFocus == nativeWindow ? "yes" : "no")
+                             + " groupFocusId=" + String (groupFocusId)
+                             + " ownWindowId=" + String (ownWindowId)
+                             + " group=" + (groupName.isNotEmpty() ? groupName : "<none>")
+                             + " class=" + (className.isNotEmpty() ? className : "<none>")
+                             + " id=" + (idName.isNotEmpty() ? idName : "<none>")
+                             + " idString=" + (idString.isNotEmpty() ? idString : "<none>")
+                             + " parentId=" + (parentId.isNotEmpty() ? parentId : "<none>")
+                             + " managerString=" + (managerString.isNotEmpty() ? managerString : "<empty>"));
         }
 
         void present (const Image& image, Rectangle<int> imageBounds)
@@ -352,7 +1180,14 @@ namespace
         String title;
         screen_context_t screenContext = nullptr;
         screen_window_t nativeWindow = nullptr;
+        screen_group_t windowGroup = nullptr;
+        screen_session_t pointerSession = nullptr;
+        screen_session_t mtouchSession = nullptr;
         void* attachedExternally = nullptr;
+        String managerString;
+        bool hasRequestedWindowManagement = false;
+        int lastLoggedStatus = -1;
+        bool usingSharedContext = false;
         float alpha = 1.0f;
         bool isVisible = false;
         bool minimised = false;
@@ -363,6 +1198,9 @@ namespace
         bool windowBuffersCreated = false;
         int repaintDispatchCount = 0;
         int presentCount = 0;
+        int pointerEventCount = 0;
+        int sessionStateLogCount = 0;
+        std::shared_ptr<PeerState> peerState = std::make_shared<PeerState>();
         TimedCallback repaintTimer { [this]() { dispatchDeferredRepaints(); } };
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (QnxComponentPeer)
@@ -576,7 +1414,7 @@ void Displays::findDisplays (const Desktop&)
 
     Display display;
     display.isMain = true;
-    display.totalArea = { 0, 0, 1280, 720 };
+    display.totalArea = { 0, 0, 1920, 1080 };
     display.userArea = display.totalArea;
     display.scale = 1.0;
     display.dpi = 96.0;

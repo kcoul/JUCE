@@ -1,8 +1,13 @@
 #include <juce_gui_extra/juce_gui_extra.h>
 #include <juce_audio_devices/juce_audio_devices.h>
+#include <unistd.h>
+#include "GeneratedBuildVersion.h"
 
 namespace
 {
+    constexpr int helloWorldWidth = 1920;
+    constexpr int helloWorldHeight = 1080;
+
     std::unique_ptr<juce::FileLogger> createAppLogger()
     {
         auto logFile = juce::File::getSpecialLocation (juce::File::currentApplicationFile)
@@ -30,6 +35,8 @@ public:
         {
             audioReady = true;
             juce::Logger::writeToLog ("Audio device manager initialised successfully");
+            preferUsbAudioOutput();
+            startToneOnLaunch();
         }
         else
         {
@@ -38,8 +45,11 @@ public:
         }
 
         setOpaque (true);
-        setSize (720, 360);
-        juce::Logger::writeToLog ("MainComponent created with size 720x360");
+        setSize (helloWorldWidth, helloWorldHeight);
+        juce::Logger::writeToLog ("MainComponent created with size "
+                                  + juce::String (helloWorldWidth)
+                                  + "x"
+                                  + juce::String (helloWorldHeight));
     }
 
     ~MainComponent() override
@@ -156,6 +166,72 @@ private:
         repaint();
     }
 
+    void startToneOnLaunch()
+    {
+        deviceManager.addAudioCallback (&player);
+        toneEnabled = true;
+        juce::Logger::writeToLog ("Tone started automatically at launch");
+    }
+
+    void preferUsbAudioOutput()
+    {
+        const auto& deviceTypes = deviceManager.getAvailableDeviceTypes();
+
+        for (auto* type : deviceTypes)
+        {
+            if (type == nullptr)
+                continue;
+
+            type->scanForDevices();
+            const auto outputNames = type->getDeviceNames (false);
+
+            juce::Logger::writeToLog ("Audio device type: " + type->getTypeName());
+
+            for (const auto& outputName : outputNames)
+                juce::Logger::writeToLog ("  Output device: " + outputName);
+        }
+
+        auto setup = deviceManager.getAudioDeviceSetup();
+        juce::String usbDeviceName;
+
+        for (auto* type : deviceTypes)
+        {
+            if (type == nullptr)
+                continue;
+
+            const auto outputNames = type->getDeviceNames (false);
+
+            for (const auto& outputName : outputNames)
+            {
+                if (outputName.containsIgnoreCase ("USB"))
+                {
+                    usbDeviceName = outputName;
+                    break;
+                }
+            }
+
+            if (usbDeviceName.isNotEmpty())
+                break;
+        }
+
+        if (usbDeviceName.isEmpty())
+        {
+            juce::Logger::writeToLog ("No USB audio output device found; leaving current output unchanged");
+            return;
+        }
+
+        setup.outputDeviceName = usbDeviceName;
+        setup.useDefaultOutputChannels = true;
+        setup.useDefaultInputChannels = true;
+
+        const auto setupError = deviceManager.setAudioDeviceSetup (setup, true);
+
+        if (setupError.isEmpty())
+            juce::Logger::writeToLog ("Selected USB audio output device: " + usbDeviceName);
+        else
+            juce::Logger::writeToLog ("Failed to select USB audio output device '" + usbDeviceName + "': " + setupError);
+    }
+
     juce::AudioDeviceManager deviceManager;
     juce::AudioSourcePlayer player;
     juce::ToneGeneratorAudioSource tone;
@@ -177,6 +253,8 @@ public:
     {
         logger = createAppLogger();
         juce::Logger::setCurrentLogger (logger.get());
+        juce::Logger::writeToLog ("Build version: " + juce::String (JUCE_QNX_HELLO_WORLD_BUILD_VERSION));
+        juce::Logger::writeToLog ("Process PID: " + juce::String ((int) getpid()));
         juce::Logger::writeToLog ("Application initialise()");
         mainWindow = std::make_unique<MainWindow> (getApplicationName());
     }
@@ -206,11 +284,13 @@ public:
                               juce::DocumentWindow::allButtons)
         {
             juce::Logger::writeToLog ("MainWindow constructed");
-            setUsingNativeTitleBar (true);
-            setResizable (true, true);
+            setUsingNativeTitleBar (false);
+            setResizable (false, false);
             setContentOwned (new MainComponent(), true);
-            centreWithSize (720, 360);
+            setBounds (0, 0, helloWorldWidth, helloWorldHeight);
+            setFullScreen (true);
             setVisible (true);
+            toFront (true);
             juce::Logger::writeToLog ("MainWindow made visible");
         }
 
