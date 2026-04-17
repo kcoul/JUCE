@@ -962,12 +962,16 @@ public:
 
     void apply ([[maybe_unused]] PosixThreadAttribute& attr) const
     {
-        #if JUCE_LINUX || JUCE_BSD || JUCE_QNX
+        #if JUCE_LINUX || JUCE_BSD
          const struct sched_param param { getPriority() };
 
          pthread_attr_setinheritsched (attr.get(), PTHREAD_EXPLICIT_SCHED);
          pthread_attr_setschedpolicy (attr.get(), getScheduler());
          pthread_attr_setschedparam (attr.get(), &param);
+        #elif JUCE_QNX
+         // QNX thread creation is more reliable when inheriting the process defaults
+         // for non-realtime worker threads, rather than forcing explicit SCHED_OTHER attrs.
+         ignoreUnused (attr);
         #endif
     }
 

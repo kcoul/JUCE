@@ -29,12 +29,15 @@ public:
         tone.setAmplitude (0.18f);
         player.setSource (&tone);
 
-        const auto error = deviceManager.initialise (0, 2, nullptr, true);
+        logStandaloneAlsaDevices();
+
+        const auto error = deviceManager.initialise (0, 2, nullptr, true, "*USB*");
 
         if (error.isEmpty())
         {
             audioReady = true;
             juce::Logger::writeToLog ("Audio device manager initialised successfully");
+            logCurrentAudioDevice ("After initialise");
             preferUsbAudioOutput();
             startToneOnLaunch();
         }
@@ -143,9 +146,46 @@ public:
     }
 
 private:
+    void logStandaloneAlsaDevices() const
+    {
+        juce::Logger::writeToLog ("Scanning standalone ALSA device type");
+
+        std::unique_ptr<juce::AudioIODeviceType> type (juce::AudioIODeviceType::createAudioIODeviceType_ALSA());
+
+        if (type == nullptr)
+        {
+            juce::Logger::writeToLog ("Standalone ALSA device type is unavailable");
+            return;
+        }
+
+        type->scanForDevices();
+        juce::Logger::writeToLog ("Standalone ALSA type name: " + type->getTypeName());
+
+        const auto outputNames = type->getDeviceNames (false);
+        const auto inputNames = type->getDeviceNames (true);
+
+        juce::Logger::writeToLog ("Standalone ALSA output count: " + juce::String (outputNames.size()));
+
+        for (const auto& outputName : outputNames)
+            juce::Logger::writeToLog ("  ALSA output: " + outputName);
+
+        juce::Logger::writeToLog ("Standalone ALSA input count: " + juce::String (inputNames.size()));
+
+        for (const auto& inputName : inputNames)
+            juce::Logger::writeToLog ("  ALSA input: " + inputName);
+    }
+
     juce::Rectangle<int> getToggleBounds() const
     {
         return getLocalBounds().withSizeKeepingCentre (120, 120).translated (0, 12);
+    }
+
+    void logCurrentAudioDevice (const juce::String& context) const
+    {
+        if (auto* currentDevice = deviceManager.getCurrentAudioDevice())
+            juce::Logger::writeToLog (context + ": current audio device '" + currentDevice->getName() + "' type=" + currentDevice->getTypeName());
+        else
+            juce::Logger::writeToLog (context + ": no current audio device");
     }
 
     void toggleTone()
@@ -227,7 +267,10 @@ private:
         const auto setupError = deviceManager.setAudioDeviceSetup (setup, true);
 
         if (setupError.isEmpty())
+        {
             juce::Logger::writeToLog ("Selected USB audio output device: " + usbDeviceName);
+            logCurrentAudioDevice ("After USB device selection");
+        }
         else
             juce::Logger::writeToLog ("Failed to select USB audio output device '" + usbDeviceName + "': " + setupError);
     }
