@@ -17,7 +17,8 @@ class MainComponent final : public juce::Component,
                             private juce::MidiInputCallback
 {
 public:
-    MainComponent()
+    explicit MainComponent (juce::PropertiesFile& settingsFileToUse)
+        : settingsFile (settingsFileToUse)
     {
         setSize (900, 620);
 
@@ -29,13 +30,13 @@ public:
         targetIpLabel.setText ("Target IP", juce::dontSendNotification);
         addAndMakeVisible (targetIpLabel);
 
-        targetIpEditor.setText (defaultTargetAddress, juce::dontSendNotification);
+        targetIpEditor.setText (settingsFile.getValue ("targetIp", defaultTargetAddress), juce::dontSendNotification);
         addAndMakeVisible (targetIpEditor);
 
         targetPortLabel.setText ("OSC Port", juce::dontSendNotification);
         addAndMakeVisible (targetPortLabel);
 
-        targetPortEditor.setText (juce::String (defaultOscPort), juce::dontSendNotification);
+        targetPortEditor.setText (settingsFile.getValue ("targetPort", juce::String (defaultOscPort)), juce::dontSendNotification);
         addAndMakeVisible (targetPortEditor);
 
         connectButton.setButtonText ("Connect");
@@ -59,7 +60,9 @@ public:
 
         midiInputsBox.setMultiLine (true);
         midiInputsBox.setReadOnly (true);
-        midiInputsBox.setColour (juce::TextEditor::backgroundColourId, juce::Colour::fromRGB (246, 242, 235));
+        midiInputsBox.setColour (juce::TextEditor::backgroundColourId, juce::Colours::black);
+        midiInputsBox.setColour (juce::TextEditor::textColourId, juce::Colours::white);
+        midiInputsBox.setColour (juce::TextEditor::outlineColourId, juce::Colour::fromRGB (88, 102, 114));
         addAndMakeVisible (midiInputsBox);
 
         logLabel.setText ("Event log", juce::dontSendNotification);
@@ -69,7 +72,9 @@ public:
         logBox.setReadOnly (true);
         logBox.setScrollbarsShown (true);
         logBox.setCaretVisible (false);
-        logBox.setColour (juce::TextEditor::backgroundColourId, juce::Colour::fromRGB (250, 248, 244));
+        logBox.setColour (juce::TextEditor::backgroundColourId, juce::Colours::black);
+        logBox.setColour (juce::TextEditor::textColourId, juce::Colours::white);
+        logBox.setColour (juce::TextEditor::outlineColourId, juce::Colour::fromRGB (88, 102, 114));
         addAndMakeVisible (logBox);
 
         connectOscSender();
@@ -78,6 +83,7 @@ public:
 
     ~MainComponent() override
     {
+        saveSettings();
         shutdownMidiInputs();
         const juce::ScopedLock lock (oscLock);
         oscSender.disconnect();
@@ -147,6 +153,7 @@ private:
         {
             targetHost = ipAddress;
             targetPort = port;
+            saveSettings();
             setStatus ("Connected to " + targetHost + ":" + juce::String (targetPort), juce::Colours::darkgreen);
             appendLog ("OSC connected to " + targetHost + ":" + juce::String (targetPort));
         }
@@ -241,6 +248,13 @@ private:
         statusLabel.setColour (juce::Label::textColourId, colour);
     }
 
+    void saveSettings()
+    {
+        settingsFile.setValue ("targetIp", targetIpEditor.getText().trim());
+        settingsFile.setValue ("targetPort", targetPortEditor.getText().trim());
+        settingsFile.saveIfNeeded();
+    }
+
     void appendLog (const juce::String& line)
     {
         const auto timestamp = juce::Time::getCurrentTime().formatted ("%H:%M:%S");
@@ -269,6 +283,7 @@ private:
     juce::TextEditor midiInputsBox;
     juce::Label logLabel;
     juce::TextEditor logBox;
+    juce::PropertiesFile& settingsFile;
 
     juce::CriticalSection oscLock;
     juce::OSCSender oscSender;
@@ -288,7 +303,14 @@ public:
 
     void initialise (const juce::String&) override
     {
-        mainWindow = std::make_unique<MainWindow> (getApplicationName());
+        juce::PropertiesFile::Options options;
+        options.applicationName = "JUCEMidiToOscBridge";
+        options.filenameSuffix = "settings";
+        options.osxLibrarySubFolder = "Application Support";
+        options.folderName = "OpenAI";
+
+        appProperties.setStorageParameters (options);
+        mainWindow = std::make_unique<MainWindow> (getApplicationName(), *appProperties.getUserSettings());
     }
 
     void shutdown() override
@@ -306,7 +328,7 @@ public:
     class MainWindow final : public juce::DocumentWindow
     {
     public:
-        explicit MainWindow (juce::String name)
+        MainWindow (juce::String name, juce::PropertiesFile& settingsFile)
             : DocumentWindow (std::move (name),
                               juce::Colour::fromRGB (234, 228, 219),
                               juce::DocumentWindow::allButtons)
@@ -314,7 +336,7 @@ public:
             setUsingNativeTitleBar (true);
             setResizable (true, false);
             setResizeLimits (760, 540, 1600, 1200);
-            setContentOwned (new MainComponent(), true);
+            setContentOwned (new MainComponent (settingsFile), true);
             setSize (900, 620);
             centreWithSize (getWidth(), getHeight());
             setVisible (true);
@@ -330,6 +352,7 @@ public:
     };
 
 private:
+    juce::ApplicationProperties appProperties;
     std::unique_ptr<MainWindow> mainWindow;
 };
 
