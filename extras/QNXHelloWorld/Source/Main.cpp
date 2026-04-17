@@ -1,10 +1,14 @@
 #include <juce_gui_extra/juce_gui_extra.h>
 #include <juce_audio_devices/juce_audio_devices.h>
+#include <juce_osc/juce_osc.h>
 #include <unistd.h>
 #include "GeneratedBuildVersion.h"
 
 namespace
 {
+    constexpr int oscListenPort = 9001;
+    constexpr float baseToneAmplitude = 0.18f;
+
     juce::Rectangle<int> getInitialDisplayArea()
     {
         if (auto* display = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay())
@@ -25,7 +29,9 @@ namespace
     }
 }
 
-class MainComponent final : public juce::Component
+class MainComponent final : public juce::Component,
+                            private juce::OSCReceiver,
+                            private juce::OSCReceiver::Listener<juce::OSCReceiver::MessageLoopCallback>
 {
 public:
     MainComponent()
@@ -33,7 +39,7 @@ public:
         setWantsKeyboardFocus (true);
         setMouseClickGrabsKeyboardFocus (true);
         tone.setFrequency (440.0);
-        tone.setAmplitude (0.18f);
+        tone.setAmplitude (baseToneAmplitude);
         player.setSource (&tone);
 
         const auto error = deviceManager.initialise (0, 2, nullptr, true, "*USB*");
@@ -58,12 +64,15 @@ public:
                                   + juce::String (getWidth())
                                   + "x"
                                   + juce::String (getHeight()));
+        initialiseOscControl();
         grabKeyboardFocus();
     }
 
     ~MainComponent() override
     {
         juce::Logger::writeToLog ("MainComponent shutting down");
+        removeListener (this);
+        disconnect();
         deviceManager.removeAudioCallback (&player);
         player.setSource (nullptr);
         deviceManager.closeAudioDevice();
@@ -116,6 +125,13 @@ public:
 
         g.setColour (juce::Colours::white);
         g.fillPath (symbol);
+
+        g.setColour (juce::Colour::fromRGBA (255, 255, 255, 210));
+        g.setFont (juce::FontOptions (26.0f));
+        g.drawText ("OSC port " + juce::String (oscListenPort), panel.getX() + 40.0f, panel.getY() + 52.0f, 420.0f, 30.0f, juce::Justification::left);
+        g.setFont (juce::FontOptions (20.0f));
+        g.drawText ("/juce/noteOn <note:int> <velocity:float?>", panel.getX() + 40.0f, panel.getY() + 92.0f, panel.getWidth() - 80.0f, 26.0f, juce::Justification::left);
+        g.drawText ("/juce/noteOff <note:int?>", panel.getX() + 40.0f, panel.getY() + 120.0f, panel.getWidth() - 80.0f, 26.0f, juce::Justification::left);
 
         auto indicatorArea = juce::Rectangle<float> (panel.getX() + 40.0f,
                                                      panel.getBottom() - 80.0f,
@@ -186,6 +202,136 @@ private:
             juce::Logger::writeToLog (context + ": no current audio device");
     }
 
+    void initialiseOscControl()
+    {
+        addListener (this);
+        registerFormatErrorHandler ([] (const char*, int dataSize)
+        {
+            juce::Logger::writeToLog ("OSC format error while parsing packet of size " + juce::String (dataSize));
+        });
+
+        if (connect (oscListenPort))
+        {
+            juce::Logger::writeToLog ("OSC receiver listening on UDP port " + juce::String (oscListenPort));
+            juce::Logger::writeToLog ("OSC schema: /juce/noteOn <note:int> <velocity:float?>, /juce/noteOff <note:int?>");
+        }
+        else
+        {
+            juce::Logger::writeToLog ("Failed to start OSC receiver on UDP port " + juce::String (oscListenPort));
+        }
+    }
+
+    void oscMessageReceived (const juce::OSCMessage& message) override
+    {
+        const auto address = message.getAddressPattern().toString();
+        juce::Logger::writeToLog ("OSC message received: " + address + " args=" + juce::String (message.size()));
+
+        if (address == "/juce/noteOn")
+        {
+            handleOscNoteOn (message);
+            return;
+        }
+
+        if (address == "/juce/noteOff")
+        {
+            handleOscNoteOff (message);
+            return;
+        }
+
+        juce::Logger::writeToLog ("Unhandled OSC address: " + address);
+    }
+
+    void handleOscNoteOn (const juce::OSCMessage& message)
+    {
+        const auto noteNumber = parseOscNoteNumber (message);
+
+        if (! juce::isPositiveAndBelow (noteNumber, 128))
+        {
+            juce::Logger::writeToLog ("OSC noteOn ignored: expected MIDI note 0-127 in argument 0");
+            return;
+        }
+
+        const auto velocity = parseOscVelocity (message);
+        const auto amplitude = juce::jlimit (0.0f, baseToneAmplitude, velocity * baseToneAmplitude);
+        const auto frequency = (float) juce::MidiMessage::getMidiNoteInHertz (noteNumber);
+
+        tone.setFrequency (frequency);
+        tone.setAmplitude (amplitude);
+        lastMidiNote = noteNumber;
+        juce::Logger::writeToLog ("OSC noteOn note=" + juce::String (noteNumber)
+                                  + " frequency=" + juce::String (frequency, 2)
+                                  + " velocity=" + juce::String (velocity, 2));
+        setToneEnabled (true);
+    }
+
+    void handleOscNoteOff (const juce::OSCMessage& message)
+    {
+        const auto noteNumber = parseOscNoteNumber (message);
+
+        if (noteNumber >= 0 && noteNumber != lastMidiNote)
+        {
+            juce::Logger::writeToLog ("OSC noteOff ignored for note " + juce::String (noteNumber)
+                                      + " because active note is " + juce::String (lastMidiNote));
+            return;
+        }
+
+        juce::Logger::writeToLog ("OSC noteOff");
+        setToneEnabled (false);
+    }
+
+    static int parseOscNoteNumber (const juce::OSCMessage& message)
+    {
+        if (message.size() == 0)
+            return -1;
+
+        const auto& argument = message[0];
+
+        if (argument.isInt32())
+            return argument.getInt32();
+
+        if (argument.isFloat32())
+            return juce::roundToInt (argument.getFloat32());
+
+        return -1;
+    }
+
+    static float parseOscVelocity (const juce::OSCMessage& message)
+    {
+        if (message.size() < 2)
+            return 1.0f;
+
+        const auto& argument = message[1];
+
+        if (argument.isFloat32())
+            return juce::jlimit (0.0f, 1.0f, argument.getFloat32());
+
+        if (argument.isInt32())
+            return juce::jlimit (0.0f, 1.0f, (float) argument.getInt32() / 127.0f);
+
+        return 1.0f;
+    }
+
+    void setToneEnabled (bool shouldEnable)
+    {
+        if (! audioReady)
+        {
+            juce::Logger::writeToLog ("setToneEnabled ignored because audio is not ready");
+            return;
+        }
+
+        if (toneEnabled == shouldEnable)
+            return;
+
+        if (shouldEnable)
+            deviceManager.addAudioCallback (&player);
+        else
+            deviceManager.removeAudioCallback (&player);
+
+        toneEnabled = shouldEnable;
+        juce::Logger::writeToLog ("Tone " + juce::String (toneEnabled ? "enabled" : "disabled"));
+        repaint();
+    }
+
     void toggleTone()
     {
         if (! audioReady)
@@ -194,14 +340,8 @@ private:
             return;
         }
 
-        if (! toneEnabled)
-            deviceManager.addAudioCallback (&player);
-        else
-            deviceManager.removeAudioCallback (&player);
-
-        toneEnabled = ! toneEnabled;
+        setToneEnabled (! toneEnabled);
         juce::Logger::writeToLog ("Tone toggled " + juce::String (toneEnabled ? "on" : "off"));
-        repaint();
     }
 
     void preferUsbAudioOutput()
@@ -270,6 +410,7 @@ private:
     juce::AudioSourcePlayer player;
     juce::ToneGeneratorAudioSource tone;
     juce::String lastError;
+    int lastMidiNote = 69;
     bool audioReady = false;
     bool toneEnabled = false;
 

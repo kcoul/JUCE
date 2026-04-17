@@ -35,6 +35,7 @@ add_executable(JUCEQNXHelloWorld
     "${JUCE_ROOT_DIR}/modules/juce_gui_extra/juce_gui_extra.cpp"
     "${JUCE_ROOT_DIR}/modules/juce_audio_basics/juce_audio_basics.cpp"
     "${JUCE_ROOT_DIR}/modules/juce_audio_devices/juce_audio_devices.cpp"
+    "${JUCE_ROOT_DIR}/modules/juce_osc/juce_osc.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/Source/Main.cpp"
 )
 

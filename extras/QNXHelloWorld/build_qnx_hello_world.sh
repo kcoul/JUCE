@@ -38,6 +38,7 @@ q++ "${COMMON[@]}" -c "$ROOT/modules/juce_gui_basics/juce_gui_basics.cpp" -o "$B
 q++ "${COMMON[@]}" -c "$ROOT/modules/juce_gui_extra/juce_gui_extra.cpp" -o "$BUILD_DIR/juce_gui_extra.o"
 q++ "${COMMON[@]}" -c "$ROOT/modules/juce_audio_basics/juce_audio_basics.cpp" -o "$BUILD_DIR/juce_audio_basics.o"
 q++ "${COMMON[@]}" -c "$ROOT/modules/juce_audio_devices/juce_audio_devices.cpp" -o "$BUILD_DIR/juce_audio_devices.o"
+q++ "${COMMON[@]}" -c "$ROOT/modules/juce_osc/juce_osc.cpp" -o "$BUILD_DIR/juce_osc.o"
 q++ "${COMMON[@]}" -c "$ROOT/extras/QNXHelloWorld/Source/Main.cpp" -o "$BUILD_DIR/Main.o"
 
 q++ "-V${TARGET}" \
@@ -52,6 +53,7 @@ q++ "-V${TARGET}" \
   "$BUILD_DIR/juce_gui_extra.o" \
   "$BUILD_DIR/juce_audio_basics.o" \
   "$BUILD_DIR/juce_audio_devices.o" \
+  "$BUILD_DIR/juce_osc.o" \
   "$BUILD_DIR/Main.o" \
   -lscreen -lasound -lsocket -lz -lexpat \
   -o "$BUILD_DIR/JUCEQNXHelloWorld"
