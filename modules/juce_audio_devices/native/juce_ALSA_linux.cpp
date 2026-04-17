@@ -631,7 +631,6 @@ public:
             return;
 
         const auto threadStarted = startThread (Priority::high);
-        JUCE_ALSA_LOG ("ALSAThread startThread returned " << (int) threadStarted);
 
         if (! threadStarted)
         {
@@ -693,8 +692,6 @@ public:
 
     void run() override
     {
-        JUCE_ALSA_LOG ("ALSAThread::run entered");
-
         while (! threadShouldExit())
         {
             if (inputDevice != nullptr && inputDevice->handle != nullptr)
@@ -729,7 +726,6 @@ public:
             {
                 const ScopedLock sl (callbackLock);
                 ++numCallbacks;
-                JUCE_ALSA_LOG ("ALSAThread callback iteration " << (int) numCallbacks.load());
 
                 if (callback != nullptr)
                 {

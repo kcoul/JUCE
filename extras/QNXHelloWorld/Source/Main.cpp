@@ -5,8 +5,13 @@
 
 namespace
 {
-    constexpr int helloWorldWidth = 1920;
-    constexpr int helloWorldHeight = 1080;
+    juce::Rectangle<int> getInitialDisplayArea()
+    {
+        if (auto* display = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay())
+            return display->totalArea;
+
+        return { 0, 0, 1920, 1080 };
+    }
 
     std::unique_ptr<juce::FileLogger> createAppLogger()
     {
@@ -25,11 +30,11 @@ class MainComponent final : public juce::Component
 public:
     MainComponent()
     {
+        setWantsKeyboardFocus (true);
+        setMouseClickGrabsKeyboardFocus (true);
         tone.setFrequency (440.0);
         tone.setAmplitude (0.18f);
         player.setSource (&tone);
-
-        logStandaloneAlsaDevices();
 
         const auto error = deviceManager.initialise (0, 2, nullptr, true, "*USB*");
 
@@ -39,7 +44,6 @@ public:
             juce::Logger::writeToLog ("Audio device manager initialised successfully");
             logCurrentAudioDevice ("After initialise");
             preferUsbAudioOutput();
-            startToneOnLaunch();
         }
         else
         {
@@ -48,11 +52,13 @@ public:
         }
 
         setOpaque (true);
-        setSize (helloWorldWidth, helloWorldHeight);
+        const auto displayArea = getInitialDisplayArea();
+        setSize (displayArea.getWidth(), displayArea.getHeight());
         juce::Logger::writeToLog ("MainComponent created with size "
-                                  + juce::String (helloWorldWidth)
+                                  + juce::String (getWidth())
                                   + "x"
-                                  + juce::String (helloWorldHeight));
+                                  + juce::String (getHeight()));
+        grabKeyboardFocus();
     }
 
     ~MainComponent() override
@@ -145,36 +151,28 @@ public:
             toggleTone();
     }
 
-private:
-    void logStandaloneAlsaDevices() const
+    bool keyPressed (const juce::KeyPress& key) override
     {
-        juce::Logger::writeToLog ("Scanning standalone ALSA device type");
+        juce::Logger::writeToLog ("MainComponent::keyPressed keyCode=" + juce::String (key.getKeyCode()));
 
-        std::unique_ptr<juce::AudioIODeviceType> type (juce::AudioIODeviceType::createAudioIODeviceType_ALSA());
-
-        if (type == nullptr)
+        if (key == juce::KeyPress::escapeKey)
         {
-            juce::Logger::writeToLog ("Standalone ALSA device type is unavailable");
-            return;
+            juce::Logger::writeToLog ("Escape pressed, requesting quit");
+            juce::JUCEApplication::getInstance()->systemRequestedQuit();
+            return true;
         }
 
-        type->scanForDevices();
-        juce::Logger::writeToLog ("Standalone ALSA type name: " + type->getTypeName());
+        if (key == juce::KeyPress::spaceKey || key == juce::KeyPress::returnKey)
+        {
+            juce::Logger::writeToLog ("Keyboard toggle requested");
+            toggleTone();
+            return true;
+        }
 
-        const auto outputNames = type->getDeviceNames (false);
-        const auto inputNames = type->getDeviceNames (true);
-
-        juce::Logger::writeToLog ("Standalone ALSA output count: " + juce::String (outputNames.size()));
-
-        for (const auto& outputName : outputNames)
-            juce::Logger::writeToLog ("  ALSA output: " + outputName);
-
-        juce::Logger::writeToLog ("Standalone ALSA input count: " + juce::String (inputNames.size()));
-
-        for (const auto& inputName : inputNames)
-            juce::Logger::writeToLog ("  ALSA input: " + inputName);
+        return false;
     }
 
+private:
     juce::Rectangle<int> getToggleBounds() const
     {
         return getLocalBounds().withSizeKeepingCentre (120, 120).translated (0, 12);
@@ -204,13 +202,6 @@ private:
         toneEnabled = ! toneEnabled;
         juce::Logger::writeToLog ("Tone toggled " + juce::String (toneEnabled ? "on" : "off"));
         repaint();
-    }
-
-    void startToneOnLaunch()
-    {
-        deviceManager.addAudioCallback (&player);
-        toneEnabled = true;
-        juce::Logger::writeToLog ("Tone started automatically at launch");
     }
 
     void preferUsbAudioOutput()
@@ -330,7 +321,7 @@ public:
             setUsingNativeTitleBar (false);
             setResizable (false, false);
             setContentOwned (new MainComponent(), true);
-            setBounds (0, 0, helloWorldWidth, helloWorldHeight);
+            setBounds (getInitialDisplayArea());
             setFullScreen (true);
             setVisible (true);
             toFront (true);

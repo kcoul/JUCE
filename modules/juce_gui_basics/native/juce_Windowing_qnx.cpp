@@ -1,4 +1,5 @@
 #include <screen/screen.h>
+#include <sys/keycodes.h>
 
 #include <cstring>
 #include <functional>
@@ -122,17 +123,88 @@ namespace
         return mods;
     }
 
+    ModifierKeys qnxModifiersFromKeyboard (int modifiers)
+    {
+        auto mods = ModifierKeys::currentModifiers.withoutMouseButtons()
+                                                  .withoutFlags (ModifierKeys::shiftModifier
+                                                               | ModifierKeys::ctrlModifier
+                                                               | ModifierKeys::altModifier
+                                                               | ModifierKeys::commandModifier);
+
+        if ((modifiers & KEYMOD_SHIFT) != 0) mods = mods.withFlags (ModifierKeys::shiftModifier);
+        if ((modifiers & KEYMOD_CTRL)  != 0) mods = mods.withFlags (ModifierKeys::ctrlModifier);
+        if ((modifiers & KEYMOD_ALT)   != 0) mods = mods.withFlags (ModifierKeys::altModifier);
+
+        return mods;
+    }
+
+    int qnxKeySymToJuceKeyCode (int keySym)
+    {
+        switch (keySym)
+        {
+            case KEYCODE_LEFT:       return KeyPress::leftKey;
+            case KEYCODE_RIGHT:      return KeyPress::rightKey;
+            case KEYCODE_UP:         return KeyPress::upKey;
+            case KEYCODE_DOWN:       return KeyPress::downKey;
+            case KEYCODE_PG_UP:      return KeyPress::pageUpKey;
+            case KEYCODE_PG_DOWN:    return KeyPress::pageDownKey;
+            case KEYCODE_HOME:       return KeyPress::homeKey;
+            case KEYCODE_END:        return KeyPress::endKey;
+            case KEYCODE_INSERT:     return KeyPress::insertKey;
+            case KEYCODE_DELETE:     return KeyPress::deleteKey;
+            case KEYCODE_BACKSPACE:  return KeyPress::backspaceKey;
+            case KEYCODE_TAB:        return KeyPress::tabKey;
+            case KEYCODE_RETURN:     return KeyPress::returnKey;
+            case KEYCODE_ESCAPE:     return KeyPress::escapeKey;
+            case KEYCODE_F1:         return KeyPress::F1Key;
+            case KEYCODE_F2:         return KeyPress::F2Key;
+            case KEYCODE_F3:         return KeyPress::F3Key;
+            case KEYCODE_F4:         return KeyPress::F4Key;
+            case KEYCODE_F5:         return KeyPress::F5Key;
+            case KEYCODE_F6:         return KeyPress::F6Key;
+            case KEYCODE_F7:         return KeyPress::F7Key;
+            case KEYCODE_F8:         return KeyPress::F8Key;
+            case KEYCODE_F9:         return KeyPress::F9Key;
+            case KEYCODE_F10:        return KeyPress::F10Key;
+            case KEYCODE_F11:        return KeyPress::F11Key;
+            case KEYCODE_F12:        return KeyPress::F12Key;
+            case KEYCODE_KP_PLUS:    return KeyPress::numberPadAdd;
+            case KEYCODE_KP_MINUS:   return KeyPress::numberPadSubtract;
+            case KEYCODE_KP_MULTIPLY:return KeyPress::numberPadMultiply;
+            case KEYCODE_KP_DIVIDE:  return KeyPress::numberPadDivide;
+            case KEYCODE_KP_DELETE:  return KeyPress::numberPadDecimalPoint;
+            case KEYCODE_KP_INSERT:  return KeyPress::numberPad0;
+            case KEYCODE_KP_END:     return KeyPress::numberPad1;
+            case KEYCODE_KP_DOWN:    return KeyPress::numberPad2;
+            case KEYCODE_KP_PG_DOWN: return KeyPress::numberPad3;
+            case KEYCODE_KP_LEFT:    return KeyPress::numberPad4;
+            case KEYCODE_KP_FIVE:    return KeyPress::numberPad5;
+            case KEYCODE_KP_RIGHT:   return KeyPress::numberPad6;
+            case KEYCODE_KP_HOME:    return KeyPress::numberPad7;
+            case KEYCODE_KP_UP:      return KeyPress::numberPad8;
+            case KEYCODE_KP_PG_UP:   return KeyPress::numberPad9;
+            case KEYCODE_PLAY:       return KeyPress::playKey;
+            case KEYCODE_STOP:       return KeyPress::stopKey;
+            case KEYCODE_FAST_FORWARD:return KeyPress::fastForwardKey;
+            case KEYCODE_REWIND:     return KeyPress::rewindKey;
+            default:                 return keySym;
+        }
+    }
+
     struct PeerState
     {
         std::atomic<class QnxComponentPeer*> peer { nullptr };
         std::atomic<bool> alive { true };
         std::function<void(Point<int>, int, int)> handlePointerEvent;
         std::function<void(Point<int>, bool)> handleTouchEvent;
+        std::function<void(int, int, int, int, int)> handleKeyboardEvent;
     };
 
     class SharedQnxScreenEventThread final : public Thread
     {
     public:
+        static constexpr uint64 eventWaitTimeoutNs = 100000000ULL;
+
         explicit SharedQnxScreenEventThread (screen_context_t contextIn)
             : Thread ("JUCE QNX Shared Screen Events"),
               context (contextIn)
@@ -168,8 +240,11 @@ namespace
 
             while (! threadShouldExit())
             {
-                if (screen_get_event (context, event, ~0ULL) != 0)
+                if (screen_get_event (context, event, eventWaitTimeoutNs) != 0)
                 {
+                    if (errno == ETIMEDOUT)
+                        continue;
+
                     if (++getEventErrorCount <= 10)
                         logQnxWindowing ("screen_get_event failed errno=" + String (errno));
 
@@ -290,6 +365,32 @@ namespace
                         }
                     });
                 }
+                else if (eventType == SCREEN_EVENT_KEYBOARD)
+                {
+                    int flags = 0;
+                    int modifiers = 0;
+                    int scan = 0;
+                    int sym = 0;
+                    int keyCap = 0;
+                    screen_get_event_property_iv (event, SCREEN_PROPERTY_FLAGS, &flags);
+                    screen_get_event_property_iv (event, SCREEN_PROPERTY_MODIFIERS, &modifiers);
+                    screen_get_event_property_iv (event, SCREEN_PROPERTY_SCAN, &scan);
+                    screen_get_event_property_iv (event, SCREEN_PROPERTY_SYM, &sym);
+                    screen_get_event_property_iv (event, SCREEN_PROPERTY_KEY_CAP, &keyCap);
+
+                    const auto weakState = std::weak_ptr<PeerState> { state };
+                    MessageManager::callAsync ([weakState, flags, modifiers, scan, sym, keyCap]
+                    {
+                        if (auto locked = weakState.lock())
+                        {
+                            if (! locked->alive)
+                                return;
+
+                            if (locked->handleKeyboardEvent != nullptr)
+                                locked->handleKeyboardEvent (flags, modifiers, scan, sym, keyCap);
+                        }
+                    });
+                }
                 else if (receivedEventCount <= 25)
                 {
                     logQnxWindowing ("Unhandled Screen event type for registered window: "
@@ -357,13 +458,39 @@ namespace
     void releaseSharedQnxScreenContext()
     {
         auto& shared = getSharedQnxScreenContext();
-        const std::scoped_lock lock (shared.mutex);
+        std::unique_ptr<SharedQnxScreenEventThread> eventThread;
+        screen_context_t contextToDestroy = nullptr;
 
-        if (shared.context == nullptr)
-            return;
+        {
+            const std::scoped_lock lock (shared.mutex);
 
-        shared.referenceCount = jmax (0, shared.referenceCount - 1);
-        logQnxWindowing ("Released shared Screen context, refCount=" + String (shared.referenceCount));
+            if (shared.context == nullptr)
+                return;
+
+            shared.referenceCount = jmax (0, shared.referenceCount - 1);
+            logQnxWindowing ("Released shared Screen context, refCount=" + String (shared.referenceCount));
+
+            if (shared.referenceCount == 0)
+            {
+                eventThread = std::move (shared.eventThread);
+                contextToDestroy = shared.context;
+                shared.context = nullptr;
+                logQnxWindowing ("Tearing down shared Screen context");
+            }
+        }
+
+        if (eventThread != nullptr)
+        {
+            eventThread->stopThread (2000);
+            eventThread.reset();
+            logQnxWindowing ("Stopped shared Screen event thread");
+        }
+
+        if (contextToDestroy != nullptr)
+        {
+            screen_destroy_context (contextToDestroy);
+            logQnxWindowing ("Destroyed shared Screen context");
+        }
     }
 
     void registerSharedQnxScreenWindow (screen_window_t window, std::shared_ptr<PeerState> state)
@@ -402,6 +529,23 @@ namespace
         return displays.front();
     }
 
+    Rectangle<int> getPrimaryQnxDisplayBounds (screen_context_t context)
+    {
+        if (auto* display = getPrimaryQnxScreenDisplay (context))
+        {
+            int size[2] { 1920, 1080 };
+
+            if (screen_get_display_property_iv (display, SCREEN_PROPERTY_SIZE, size) == 0
+                && size[0] > 0
+                && size[1] > 0)
+            {
+                return { 0, 0, size[0], size[1] };
+            }
+        }
+
+        return { 0, 0, 1920, 1080 };
+    }
+
     class QnxComponentPeer final : public ComponentPeer
     {
     public:
@@ -420,6 +564,10 @@ namespace
             peerState->handleTouchEvent = [this] (Point<int> position, bool isTouchDown)
             {
                 handleTouchEvent (position, isTouchDown);
+            };
+            peerState->handleKeyboardEvent = [this] (int flags, int modifiers, int scan, int sym, int keyCap)
+            {
+                handleKeyboardEvent (flags, modifiers, scan, sym, keyCap);
             };
 
             if (auto componentBounds = component.getBounds(); ! componentBounds.isEmpty())
@@ -489,6 +637,7 @@ namespace
             peerState->alive = false;
             peerState->handlePointerEvent = {};
             peerState->handleTouchEvent = {};
+            peerState->handleKeyboardEvent = {};
             logQnxWindowing ("QnxComponentPeer dtor");
             if (ownsWindow())
             {
@@ -659,6 +808,7 @@ namespace
             int displaySize[2] { 0, 0 };
             screen_get_display_property_iv (display, SCREEN_PROPERTY_WINDOW_MANAGER_ID, &windowManagerId);
             screen_get_display_property_iv (display, SCREEN_PROPERTY_SIZE, displaySize);
+            primaryDisplayBounds = { 0, 0, jmax (1, displaySize[0]), jmax (1, displaySize[1]) };
 
             logQnxWindowing ("Attached window to primary display size="
                              + String (displaySize[0]) + "x" + String (displaySize[1])
@@ -749,7 +899,16 @@ namespace
 
         void handlePointerEvent (Point<int> eventPosition, int buttons, int wheelTicks)
         {
-            const auto localPos = globalToLocal (eventPosition.toFloat());
+            auto localPos = globalToLocal (eventPosition.toFloat());
+
+            if (! primaryDisplayBounds.isEmpty()
+                && (primaryDisplayBounds.getWidth() != bounds.getWidth()
+                    || primaryDisplayBounds.getHeight() != bounds.getHeight()))
+            {
+                localPos.x = ((float) eventPosition.x / (float) primaryDisplayBounds.getWidth()) * (float) bounds.getWidth();
+                localPos.y = ((float) eventPosition.y / (float) primaryDisplayBounds.getHeight()) * (float) bounds.getHeight();
+            }
+
             const auto mods = qnxModifiersFromButtons (buttons);
 
             ModifierKeys::currentModifiers = mods;
@@ -759,6 +918,8 @@ namespace
                 logQnxWindowing ("Pointer event pos="
                                  + String (eventPosition.x) + "," + String (eventPosition.y)
                                  + " local=" + String (roundToInt (localPos.x)) + "," + String (roundToInt (localPos.y))
+                                 + " display=" + String (primaryDisplayBounds.getWidth()) + "x" + String (primaryDisplayBounds.getHeight())
+                                 + " bounds=" + String (bounds.getWidth()) + "x" + String (bounds.getHeight())
                                  + " buttons=" + String (buttons)
                                  + " wheel=" + String (wheelTicks));
 
@@ -793,6 +954,46 @@ namespace
             handlePointerEvent (eventPosition,
                                 isTouchDown ? SCREEN_LEFT_MOUSE_BUTTON : 0,
                                 0);
+        }
+
+        void handleKeyboardEvent (int flags, int modifiers, int scan, int sym, int keyCap)
+        {
+            const bool isKeyDown = (flags & SCREEN_FLAG_KEY_DOWN) != 0;
+            const bool isRepeat = (flags & SCREEN_FLAG_KEY_REPEAT) != 0;
+            const auto newModifiers = qnxModifiersFromKeyboard (modifiers);
+            const bool modifiersChanged = newModifiers != ModifierKeys::currentModifiers;
+            ModifierKeys::currentModifiers = newModifiers;
+
+            if (! focused)
+            {
+                focused = true;
+                handleFocusGain();
+            }
+
+            if (modifiersChanged)
+                handleModifierKeysChange();
+
+            if (++keyboardEventCount <= 20 || (keyboardEventCount % 50) == 0)
+                logQnxWindowing ("Keyboard event flags=" + String (flags)
+                                 + " modifiers=" + String (modifiers)
+                                 + " scan=" + String (scan)
+                                 + " sym=" + String (sym)
+                                 + " keyCap=" + String (keyCap)
+                                 + " isKeyDown=" + String (isKeyDown ? "yes" : "no")
+                                 + " repeat=" + String (isRepeat ? "yes" : "no"));
+
+            const int keyCode = qnxKeySymToJuceKeyCode (sym != 0 ? sym : keyCap);
+            const juce_wchar textCharacter = (keyCap >= 0x20 && keyCap != KEYCODE_DELETE) ? (juce_wchar) keyCap : 0;
+
+            if (isKeyDown)
+            {
+                handleKeyUpOrDown (true);
+                handleKeyPress (keyCode, textCharacter);
+            }
+            else
+            {
+                handleKeyUpOrDown (false);
+            }
         }
 
         void createEmbeddedInputSessions()
@@ -831,6 +1032,20 @@ namespace
             else
             {
                 logQnxWindowing ("screen_create_session_type(SCREEN_EVENT_MTOUCH_TOUCH) failed, errno=" + String (errno));
+            }
+
+            if (screen_create_session_type (&keyboardSession, screenContext, SCREEN_EVENT_KEYBOARD) == 0)
+            {
+                if (screen_set_session_property_pv (keyboardSession, SCREEN_PROPERTY_WINDOW, &windowHandle) == 0)
+                    logQnxWindowing ("Created embedded keyboard session for root window");
+                else
+                    logQnxWindowing ("screen_set_session_property_pv(keyboard, SCREEN_PROPERTY_WINDOW) failed, errno=" + String (errno));
+
+                attachEmbeddedSessionToPrimaryDisplay (keyboardSession, display, "keyboard");
+            }
+            else
+            {
+                logQnxWindowing ("screen_create_session_type(SCREEN_EVENT_KEYBOARD) failed, errno=" + String (errno));
             }
 
             updateEmbeddedInputSessions();
@@ -888,6 +1103,7 @@ namespace
 
             updateSession (pointerSession, "pointer", false);
             updateSession (mtouchSession, "mtouch", true);
+            updateSession (keyboardSession, "keyboard", false);
 
             if (++sessionStateLogCount <= 10 || (sessionStateLogCount % 25) == 0)
                 logQnxWindowing ("Updated embedded input sessions size="
@@ -942,6 +1158,15 @@ namespace
                     else
                         logQnxWindowing ("screen_set_device_property_pv(mtouch, SCREEN_PROPERTY_SESSION) failed, errno=" + String (errno));
                 }
+
+                if (keyboardSession != nullptr && deviceType == SCREEN_EVENT_KEYBOARD)
+                {
+                    auto* sessionHandle = reinterpret_cast<void*> (keyboardSession);
+                    if (screen_set_device_property_pv (device, SCREEN_PROPERTY_SESSION, &sessionHandle) == 0)
+                        logQnxWindowing ("Bound keyboard device to embedded keyboard session");
+                    else
+                        logQnxWindowing ("screen_set_device_property_pv(keyboard, SCREEN_PROPERTY_SESSION) failed, errno=" + String (errno));
+                }
             }
         }
 
@@ -959,6 +1184,13 @@ namespace
                 logQnxWindowing ("Destroying embedded mtouch session");
                 screen_destroy_session (mtouchSession);
                 mtouchSession = nullptr;
+            }
+
+            if (keyboardSession != nullptr)
+            {
+                logQnxWindowing ("Destroying embedded keyboard session");
+                screen_destroy_session (keyboardSession);
+                keyboardSession = nullptr;
             }
         }
 
@@ -1180,9 +1412,11 @@ namespace
         String title;
         screen_context_t screenContext = nullptr;
         screen_window_t nativeWindow = nullptr;
+        Rectangle<int> primaryDisplayBounds;
         screen_group_t windowGroup = nullptr;
         screen_session_t pointerSession = nullptr;
         screen_session_t mtouchSession = nullptr;
+        screen_session_t keyboardSession = nullptr;
         void* attachedExternally = nullptr;
         String managerString;
         bool hasRequestedWindowManagement = false;
@@ -1199,6 +1433,7 @@ namespace
         int repaintDispatchCount = 0;
         int presentCount = 0;
         int pointerEventCount = 0;
+        int keyboardEventCount = 0;
         int sessionStateLogCount = 0;
         std::shared_ptr<PeerState> peerState = std::make_shared<PeerState>();
         TimedCallback repaintTimer { [this]() { dispatchDeferredRepaints(); } };
@@ -1412,9 +1647,18 @@ void Displays::findDisplays (const Desktop&)
 {
     displays.clearQuick();
 
+    auto displayArea = Rectangle<int> (0, 0, 1920, 1080);
+    auto* context = acquireSharedQnxScreenContext();
+
+    if (context != nullptr)
+    {
+        displayArea = getPrimaryQnxDisplayBounds (context);
+        releaseSharedQnxScreenContext();
+    }
+
     Display display;
     display.isMain = true;
-    display.totalArea = { 0, 0, 1920, 1080 };
+    display.totalArea = displayArea;
     display.userArea = display.totalArea;
     display.scale = 1.0;
     display.dpi = 96.0;
