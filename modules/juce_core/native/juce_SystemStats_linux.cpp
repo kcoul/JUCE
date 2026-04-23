@@ -385,7 +385,7 @@ String SystemStats::getUniqueDeviceID()
 //==============================================================================
 uint32 juce_millisecondsSinceStartup() noexcept
 {
-    return (uint32) (Time::getHighResolutionTicks() / 1000);
+    return (uint32) (Time::getHighResolutionTicks() / 1'000);
 }
 
 int64 Time::getHighResolutionTicks() noexcept
@@ -394,12 +394,12 @@ int64 Time::getHighResolutionTicks() noexcept
 
     clock_gettime (CLOCK_MONOTONIC, &t);
 
-    return (t.tv_sec * (int64) 1000000) + (t.tv_nsec / 1000);
+    return (t.tv_sec * (int64) 1'000'000) + (t.tv_nsec / 1'000);
 }
 
 int64 Time::getHighResolutionTicksPerSecond() noexcept
 {
-    return 1000000;  // (microseconds)
+    return 1'000'000;  // (microseconds)
 }
 
 double Time::getMillisecondCounterHiRes() noexcept

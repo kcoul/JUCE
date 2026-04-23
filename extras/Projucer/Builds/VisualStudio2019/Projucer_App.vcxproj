@@ -1884,6 +1884,18 @@
     <ClCompile Include="..\..\..\..\modules\juce_gui_basics\juce_gui_basics.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
+    <ClCompile Include="..\..\..\..\modules\juce_gui_basics\juce_gui_basics_2.cpp">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </ClCompile>
+    <ClCompile Include="..\..\..\..\modules\juce_gui_basics\juce_gui_basics_3.cpp">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </ClCompile>
+    <ClCompile Include="..\..\..\..\modules\juce_gui_basics\juce_gui_basics_4.cpp">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </ClCompile>
+    <ClCompile Include="..\..\..\..\modules\juce_gui_basics\juce_gui_basics_5.cpp">
+      <ExcludedFromBuild>true</ExcludedFromBuild>
+    </ClCompile>
     <ClCompile Include="..\..\..\..\modules\juce_gui_extra\code_editor\juce_CodeDocument.cpp">
       <ExcludedFromBuild>true</ExcludedFromBuild>
     </ClCompile>
@@ -1997,6 +2009,10 @@
     <ClCompile Include="..\..\JuceLibraryCode\include_juce_gui_basics.cpp">
       <AdditionalOptions> /bigobj %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
+    <ClCompile Include="..\..\JuceLibraryCode\include_juce_gui_basics_2.cpp"/>
+    <ClCompile Include="..\..\JuceLibraryCode\include_juce_gui_basics_3.cpp"/>
+    <ClCompile Include="..\..\JuceLibraryCode\include_juce_gui_basics_4.cpp"/>
+    <ClCompile Include="..\..\JuceLibraryCode\include_juce_gui_basics_5.cpp"/>
     <ClCompile Include="..\..\JuceLibraryCode\include_juce_gui_extra.cpp"/>
   </ItemGroup>
   <ItemGroup>
@@ -2245,6 +2261,8 @@
     <ClInclude Include="..\..\..\..\modules\juce_core\time\juce_PerformanceCounter.h"/>
     <ClInclude Include="..\..\..\..\modules\juce_core\time\juce_RelativeTime.h"/>
     <ClInclude Include="..\..\..\..\modules\juce_core\time\juce_Time.h"/>
+    <ClInclude Include="..\..\..\..\modules\juce_core\time\juce_TimedDiagnostic.h"/>
+    <ClInclude Include="..\..\..\..\modules\juce_core\time\juce_TimeUnits.h"/>
     <ClInclude Include="..\..\..\..\modules\juce_core\unit_tests\juce_UnitTest.h"/>
     <ClInclude Include="..\..\..\..\modules\juce_core\unit_tests\juce_UnitTestCategories.h"/>
     <ClInclude Include="..\..\..\..\modules\juce_core\xml\juce_XmlDocument.h"/>
@@ -2321,7 +2339,6 @@
     <ClInclude Include="..\..\..\..\modules\juce_graphics\contexts\juce_GraphicsContext.h"/>
     <ClInclude Include="..\..\..\..\modules\juce_graphics\contexts\juce_LowLevelGraphicsContext.h"/>
     <ClInclude Include="..\..\..\..\modules\juce_graphics\contexts\juce_LowLevelGraphicsSoftwareRenderer.h"/>
-    <ClInclude Include="..\..\..\..\modules\juce_graphics\detail\juce_FontRendering.h"/>
     <ClInclude Include="..\..\..\..\modules\juce_graphics\detail\juce_JustifiedText.h"/>
     <ClInclude Include="..\..\..\..\modules\juce_graphics\detail\juce_Ranges.h"/>
     <ClInclude Include="..\..\..\..\modules\juce_graphics\detail\juce_ShapedText.h"/>
@@ -2944,6 +2961,8 @@
     <ClInclude Include="..\..\JuceLibraryCode\JuceHeader.h"/>
   </ItemGroup>
   <ItemGroup>
+    <None Include="..\..\Source\Assets\AppIcon.icon\Assets\juceicon.svg"/>
+    <None Include="..\..\Source\Assets\AppIcon.icon\icon.json"/>
     <None Include="..\..\..\Build\CMake\JuceLV2Defines.h.in"/>
     <None Include="..\..\..\Build\CMake\LaunchScreen.storyboard"/>
     <None Include="..\..\..\Build\CMake\PIPAudioProcessor.cpp.in"/>
