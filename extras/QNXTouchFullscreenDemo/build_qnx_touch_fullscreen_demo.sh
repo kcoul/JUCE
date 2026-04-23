@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-source /Users/kicoulter/qnx800/qnxsdp-env.sh
+source "$HOME/qnx800/qnxsdp-env.sh"
 
 TARGET="${1:-12.2.0,gcc_ntoaarch64le}"
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")"/../.. && pwd)"
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 TARGET_DIR="${TARGET//,/_}"
-BUILD_DIR="$ROOT/build/qnx_hello_world/$TARGET_DIR"
+BUILD_DIR="$ROOT/build/qnx_touch_fullscreen_demo/$TARGET_DIR"
 GENERATED_HEADER="$BUILD_DIR/GeneratedBuildVersion.h"
 
 mkdir -p "$BUILD_DIR"
 
-cmake -DROOT="$ROOT" -DOUTPUT_HEADER="$GENERATED_HEADER" -P "$ROOT/extras/QNXHelloWorld/cmake/GenerateBuildVersion.cmake"
+cmake -DROOT="$ROOT" -DOUTPUT_HEADER="$GENERATED_HEADER" -P "$ROOT/extras/QNXTouchFullscreenDemo/cmake/GenerateBuildVersion.cmake"
 
 COMMON=(
   "-V${TARGET}"
@@ -22,9 +22,9 @@ COMMON=(
   -DJUCE_JACK=0
   -DJUCE_ALSA=1
   -DJUCE_USE_FONTCONFIG=0
-  -I"$ROOT"
-  -I"$ROOT/modules"
-  -I"$BUILD_DIR"
+  "-I$ROOT"
+  "-I$ROOT/modules"
+  "-I$BUILD_DIR"
 )
 
 q++ "${COMMON[@]}" -c "$ROOT/modules/juce_core/juce_core.cpp" -o "$BUILD_DIR/juce_core.o"
@@ -35,11 +35,14 @@ q++ "${COMMON[@]}" -c "$ROOT/modules/juce_graphics/juce_graphics_Harfbuzz.cpp" -
 qcc "-V${TARGET}" -DSB_CONFIG_UNITY=1 -I"$ROOT" -I"$ROOT/modules" -c "$ROOT/modules/juce_graphics/unicode/sheenbidi/Source/SheenBidi.c" -o "$BUILD_DIR/SheenBidi.o"
 q++ "${COMMON[@]}" -c "$ROOT/modules/juce_data_structures/juce_data_structures.cpp" -o "$BUILD_DIR/juce_data_structures.o"
 q++ "${COMMON[@]}" -c "$ROOT/modules/juce_gui_basics/juce_gui_basics.cpp" -o "$BUILD_DIR/juce_gui_basics.o"
-q++ "${COMMON[@]}" -c "$ROOT/modules/juce_gui_extra/juce_gui_extra.cpp" -o "$BUILD_DIR/juce_gui_extra.o"
+q++ "${COMMON[@]}" -c "$ROOT/modules/juce_gui_basics/juce_gui_basics_2.cpp" -o "$BUILD_DIR/juce_gui_basics_2.o"
+q++ "${COMMON[@]}" -c "$ROOT/modules/juce_gui_basics/juce_gui_basics_3.cpp" -o "$BUILD_DIR/juce_gui_basics_3.o"
+q++ "${COMMON[@]}" -c "$ROOT/modules/juce_gui_basics/juce_gui_basics_4.cpp" -o "$BUILD_DIR/juce_gui_basics_4.o"
+q++ "${COMMON[@]}" -c "$ROOT/modules/juce_gui_basics/juce_gui_basics_5.cpp" -o "$BUILD_DIR/juce_gui_basics_5.o"
 q++ "${COMMON[@]}" -c "$ROOT/modules/juce_audio_basics/juce_audio_basics.cpp" -o "$BUILD_DIR/juce_audio_basics.o"
 q++ "${COMMON[@]}" -c "$ROOT/modules/juce_audio_devices/juce_audio_devices.cpp" -o "$BUILD_DIR/juce_audio_devices.o"
 q++ "${COMMON[@]}" -c "$ROOT/modules/juce_osc/juce_osc.cpp" -o "$BUILD_DIR/juce_osc.o"
-q++ "${COMMON[@]}" -c "$ROOT/extras/QNXHelloWorld/Source/Main.cpp" -o "$BUILD_DIR/Main.o"
+q++ "${COMMON[@]}" -c "$ROOT/extras/QNXTouchFullscreenDemo/Source/Main.cpp" -o "$BUILD_DIR/Main.o"
 
 q++ "-V${TARGET}" \
   "$BUILD_DIR/juce_core.o" \
@@ -50,12 +53,15 @@ q++ "-V${TARGET}" \
   "$BUILD_DIR/SheenBidi.o" \
   "$BUILD_DIR/juce_data_structures.o" \
   "$BUILD_DIR/juce_gui_basics.o" \
-  "$BUILD_DIR/juce_gui_extra.o" \
+  "$BUILD_DIR/juce_gui_basics_2.o" \
+  "$BUILD_DIR/juce_gui_basics_3.o" \
+  "$BUILD_DIR/juce_gui_basics_4.o" \
+  "$BUILD_DIR/juce_gui_basics_5.o" \
   "$BUILD_DIR/juce_audio_basics.o" \
   "$BUILD_DIR/juce_audio_devices.o" \
   "$BUILD_DIR/juce_osc.o" \
   "$BUILD_DIR/Main.o" \
   -lscreen -lasound -lsocket -lz -lexpat \
-  -o "$BUILD_DIR/JUCEQNXHelloWorld"
+  -o "$BUILD_DIR/JUCEQNXTouchFullscreenDemo"
 
-echo "Built: $BUILD_DIR/JUCEQNXHelloWorld"
+echo "Built: $BUILD_DIR/JUCEQNXTouchFullscreenDemo"

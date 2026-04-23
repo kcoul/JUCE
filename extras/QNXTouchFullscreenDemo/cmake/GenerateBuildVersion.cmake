@@ -8,7 +8,7 @@ if (NOT DEFINED OUTPUT_HEADER)
     message(FATAL_ERROR "OUTPUT_HEADER must point at the generated header path")
 endif()
 
-set(version_file "${ROOT}/extras/QNXHelloWorld/BuildVersion.txt")
+set(version_file "${ROOT}/extras/QNXTouchFullscreenDemo/BuildVersion.txt")
 
 if (EXISTS "${version_file}")
     file(READ "${version_file}" current_build_number)
@@ -41,7 +41,7 @@ get_filename_component(output_dir "${OUTPUT_HEADER}" DIRECTORY)
 file(MAKE_DIRECTORY "${output_dir}")
 file(WRITE "${OUTPUT_HEADER}"
 "#pragma once\n"
-"#define JUCE_QNX_HELLO_WORLD_BUILD_NUMBER ${next_build_number}\n"
-"#define JUCE_QNX_HELLO_WORLD_BUILD_VERSION \"${next_build_version}\"\n")
+"#define JUCE_QNX_TOUCH_FULLSCREEN_DEMO_BUILD_NUMBER ${next_build_number}\n"
+"#define JUCE_QNX_TOUCH_FULLSCREEN_DEMO_BUILD_VERSION \"${next_build_version}\"\n")
 
-message(STATUS "Generated JUCE QNX Hello World build version ${next_build_version}")
+message(STATUS "Generated JUCE QNX Touch Fullscreen Demo build version ${next_build_version}")

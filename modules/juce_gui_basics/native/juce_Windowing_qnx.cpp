@@ -3,9 +3,12 @@
 
 #include <cstring>
 #include <functional>
+#include <limits>
 #include <map>
 #include <mutex>
 #include <vector>
+
+#include "juce_MultiTouchMapper.h"
 
 namespace juce
 {
@@ -193,11 +196,21 @@ namespace
 
     struct PeerState
     {
+        struct PendingTouchEvent
+        {
+            Point<int> position;
+            int touchId = -1;
+            int eventType = SCREEN_EVENT_NONE;
+        };
+
         std::atomic<class QnxComponentPeer*> peer { nullptr };
         std::atomic<bool> alive { true };
         std::function<void(Point<int>, int, int)> handlePointerEvent;
-        std::function<void(Point<int>, bool)> handleTouchEvent;
+        std::function<void(Point<int>, int, int)> handleTouchEvent;
         std::function<void(int, int, int, int, int)> handleKeyboardEvent;
+        std::mutex pendingTouchMutex;
+        std::vector<PendingTouchEvent> pendingTouchEvents;
+        bool touchDispatchPending = false;
     };
 
     class SharedQnxScreenEventThread final : public Thread
@@ -349,21 +362,10 @@ namespace
                       || eventType == SCREEN_EVENT_MTOUCH_RELEASE)
                 {
                     int position[2] { 0, 0 };
+                    int touchId = -1;
                     screen_get_event_property_iv (event, SCREEN_PROPERTY_POSITION, position);
-
-                    const bool isTouchDown = eventType != SCREEN_EVENT_MTOUCH_RELEASE;
-                    const auto weakState = std::weak_ptr<PeerState> { state };
-                    MessageManager::callAsync ([weakState, positionX = position[0], positionY = position[1], isTouchDown]
-                    {
-                        if (auto locked = weakState.lock())
-                        {
-                            if (! locked->alive)
-                                return;
-
-                            if (locked->handleTouchEvent != nullptr)
-                                locked->handleTouchEvent ({ positionX, positionY }, isTouchDown);
-                        }
-                    });
+                    screen_get_event_property_iv (event, SCREEN_PROPERTY_TOUCH_ID, &touchId);
+                    queueTouchEvent (state, { position[0], position[1] }, touchId, eventType);
                 }
                 else if (eventType == SCREEN_EVENT_KEYBOARD)
                 {
@@ -402,6 +404,80 @@ namespace
         }
 
     private:
+        static void queueTouchEvent (const std::shared_ptr<PeerState>& state,
+                                     Point<int> position,
+                                     int touchId,
+                                     int eventType)
+        {
+            bool shouldScheduleDispatch = false;
+
+            {
+                const std::scoped_lock lock (state->pendingTouchMutex);
+
+                if (eventType == SCREEN_EVENT_MTOUCH_MOVE
+                    && ! state->pendingTouchEvents.empty())
+                {
+                    auto& lastEvent = state->pendingTouchEvents.back();
+
+                    if (lastEvent.eventType == SCREEN_EVENT_MTOUCH_MOVE
+                        && lastEvent.touchId == touchId)
+                    {
+                        lastEvent.position = position;
+                    }
+                    else
+                    {
+                        state->pendingTouchEvents.push_back ({ position, touchId, eventType });
+                    }
+                }
+                else
+                {
+                    state->pendingTouchEvents.push_back ({ position, touchId, eventType });
+                }
+
+                if (! state->touchDispatchPending)
+                {
+                    state->touchDispatchPending = true;
+                    shouldScheduleDispatch = true;
+                }
+            }
+
+            if (! shouldScheduleDispatch)
+                return;
+
+            const auto weakState = std::weak_ptr<PeerState> { state };
+            MessageManager::callAsync ([weakState]
+            {
+                if (auto locked = weakState.lock())
+                {
+                    if (! locked->alive)
+                        return;
+
+                    for (;;)
+                    {
+                        std::vector<PeerState::PendingTouchEvent> eventsToProcess;
+
+                        {
+                            const std::scoped_lock lock (locked->pendingTouchMutex);
+
+                            if (locked->pendingTouchEvents.empty())
+                            {
+                                locked->touchDispatchPending = false;
+                                break;
+                            }
+
+                            eventsToProcess.swap (locked->pendingTouchEvents);
+                        }
+
+                        if (locked->handleTouchEvent == nullptr)
+                            continue;
+
+                        for (const auto& event : eventsToProcess)
+                            locked->handleTouchEvent (event.position, event.touchId, event.eventType);
+                    }
+                }
+            });
+        }
+
         static int getObjectType (screen_event_t event)
         {
             int objectType = 0;
@@ -561,9 +637,9 @@ namespace
             {
                 handlePointerEvent (position, buttons, wheelTicks);
             };
-            peerState->handleTouchEvent = [this] (Point<int> position, bool isTouchDown)
+            peerState->handleTouchEvent = [this] (Point<int> position, int touchId, int eventType)
             {
-                handleTouchEvent (position, isTouchDown);
+                handleTouchEvent (position, touchId, eventType);
             };
             peerState->handleKeyboardEvent = [this] (int flags, int modifiers, int scan, int sym, int keyCap)
             {
@@ -633,6 +709,8 @@ namespace
 
         ~QnxComponentPeer() override
         {
+            currentTouches.deleteAllTouchesForPeer (this);
+            activeTouchContacts.clear();
             peerState->peer = nullptr;
             peerState->alive = false;
             peerState->handlePointerEvent = {};
@@ -734,18 +812,6 @@ namespace
         void repaint (const Rectangle<int>& area) override
         {
             pendingRepaintArea = pendingRepaintArea.getUnion (area);
-
-            if (pendingRepaintArea == area)
-                logQnxWindowing ("Queued repaint for " + area.toString());
-
-            if (isVisible
-                && ! minimised
-                && ! isPerformingRepaint
-                && MessageManager::getInstance()->currentThreadHasLockedMessageManager())
-            {
-                logQnxWindowing ("Flushing repaint immediately on message thread");
-                performAnyPendingRepaintsNow();
-            }
         }
 
         void performAnyPendingRepaintsNow() override
@@ -899,15 +965,7 @@ namespace
 
         void handlePointerEvent (Point<int> eventPosition, int buttons, int wheelTicks)
         {
-            auto localPos = globalToLocal (eventPosition.toFloat());
-
-            if (! primaryDisplayBounds.isEmpty()
-                && (primaryDisplayBounds.getWidth() != bounds.getWidth()
-                    || primaryDisplayBounds.getHeight() != bounds.getHeight()))
-            {
-                localPos.x = ((float) eventPosition.x / (float) primaryDisplayBounds.getWidth()) * (float) bounds.getWidth();
-                localPos.y = ((float) eventPosition.y / (float) primaryDisplayBounds.getHeight()) * (float) bounds.getHeight();
-            }
+            auto localPos = getLocalEventPosition (eventPosition);
 
             const auto mods = qnxModifiersFromButtons (buttons);
 
@@ -949,11 +1007,160 @@ namespace
             }
         }
 
-        void handleTouchEvent (Point<int> eventPosition, bool isTouchDown)
+        void handleTouchEvent (Point<int> eventPosition, int touchId, int eventType)
         {
-            handlePointerEvent (eventPosition,
-                                isTouchDown ? SCREEN_LEFT_MOUSE_BUTTON : 0,
-                                0);
+            const auto localPos = getLocalEventPosition (eventPosition);
+            const auto time = Time::currentTimeMillis();
+            const auto stableTouchId = getStableTouchId (localPos, touchId, eventType);
+            const auto touchIndex = currentTouches.getIndexOfTouch (this, stableTouchId);
+            auto modsToSend = ModifierKeys::getCurrentModifiers().withoutMouseButtons();
+            bool shouldSendCancel = false;
+            static int touchEventLogCount = 0;
+
+            if (++touchEventLogCount <= 50 || (touchEventLogCount % 100) == 0)
+            {
+                logQnxWindowing ("Touch event type="
+                                 + String (qnxScreenEventTypeToString (eventType))
+                                 + " rawTouchId=" + String (touchId)
+                                 + " stableTouchId=" + String (stableTouchId)
+                                 + String (touchId <= 0 ? " (fallback)" : "")
+                                 + " touchIndex=" + String (touchIndex)
+                                 + " global=" + String (eventPosition.x) + "," + String (eventPosition.y)
+                                 + " local=" + String (roundToInt (localPos.x)) + "," + String (roundToInt (localPos.y)));
+            }
+
+            if (eventType == SCREEN_EVENT_MTOUCH_TOUCH)
+            {
+                ModifierKeys::currentModifiers = modsToSend.withFlags (ModifierKeys::leftButtonModifier);
+                modsToSend = ModifierKeys::currentModifiers;
+
+                handleMouseEvent (MouseInputSource::InputSourceType::touch,
+                                  localPos,
+                                  modsToSend.withoutMouseButtons(),
+                                  MouseInputSource::defaultPressure,
+                                  0.0f,
+                                  time,
+                                  {},
+                                  touchIndex);
+            }
+            else if (eventType == SCREEN_EVENT_MTOUCH_RELEASE)
+            {
+                ModifierKeys::currentModifiers = modsToSend;
+                currentTouches.clearTouch (touchIndex);
+                releaseFallbackTouch (touchId, stableTouchId);
+                shouldSendCancel = ! currentTouches.areAnyTouchesActive();
+            }
+            else
+            {
+                ModifierKeys::currentModifiers = modsToSend.withFlags (ModifierKeys::leftButtonModifier);
+                modsToSend = ModifierKeys::currentModifiers;
+            }
+
+            handleMouseEvent (MouseInputSource::InputSourceType::touch,
+                              localPos,
+                              modsToSend,
+                              MouseInputSource::defaultPressure,
+                              0.0f,
+                              time,
+                              {},
+                              touchIndex);
+
+            if (eventType == SCREEN_EVENT_MTOUCH_RELEASE)
+            {
+                handleMouseEvent (MouseInputSource::InputSourceType::touch,
+                                  MouseInputSource::offscreenMousePos,
+                                  ModifierKeys::getCurrentModifiers().withoutMouseButtons(),
+                                  MouseInputSource::defaultPressure,
+                                  0.0f,
+                                  time,
+                                  {},
+                                  touchIndex);
+
+                if (shouldSendCancel)
+                    currentTouches.clear();
+            }
+        }
+
+        int getStableTouchId (Point<float> position, int rawTouchId, int eventType)
+        {
+            if (eventType == SCREEN_EVENT_MTOUCH_TOUCH)
+            {
+                if (const auto existingTouchId = findBestMatchingActiveTouch (position, rawTouchId, 20.0f);
+                    existingTouchId != 0)
+                {
+                    updateActiveTouchContact (existingTouchId, rawTouchId, position);
+                    return existingTouchId;
+                }
+
+                const auto stableTouchId = nextStableTouchId++;
+                updateActiveTouchContact (stableTouchId, rawTouchId, position);
+                return stableTouchId;
+            }
+
+            if (const auto existingTouchId = findBestMatchingActiveTouch (position, rawTouchId, std::numeric_limits<float>::max());
+                existingTouchId != 0)
+            {
+                updateActiveTouchContact (existingTouchId, rawTouchId, position);
+                return existingTouchId;
+            }
+
+            const auto stableTouchId = nextStableTouchId++;
+            updateActiveTouchContact (stableTouchId, rawTouchId, position);
+            return stableTouchId;
+        }
+
+        int findBestMatchingActiveTouch (Point<float> position, int rawTouchId, float maxDistance) const
+        {
+            auto bestTouchId = 0;
+            auto bestScore = std::numeric_limits<float>::max();
+
+            for (const auto& [stableTouchId, contact] : activeTouchContacts)
+            {
+                const auto delta = contact.position - position;
+                const auto distanceSquared = delta.x * delta.x + delta.y * delta.y;
+
+                if (distanceSquared > maxDistance * maxDistance)
+                    continue;
+
+                auto score = distanceSquared;
+
+                if (rawTouchId > 0 && contact.rawTouchId == rawTouchId)
+                    score -= 1000000.0f;
+
+                if (score < bestScore)
+                {
+                    bestScore = score;
+                    bestTouchId = stableTouchId;
+                }
+            }
+
+            return bestTouchId;
+        }
+
+        void updateActiveTouchContact (int stableTouchId, int rawTouchId, Point<float> position)
+        {
+            activeTouchContacts[stableTouchId] = { stableTouchId, rawTouchId, position };
+        }
+
+        void releaseFallbackTouch (int rawTouchId, int stableTouchId)
+        {
+            ignoreUnused (rawTouchId);
+            activeTouchContacts.erase (stableTouchId);
+        }
+
+        Point<float> getLocalEventPosition (Point<int> eventPosition)
+        {
+            auto localPos = globalToLocal (eventPosition.toFloat());
+
+            if (! primaryDisplayBounds.isEmpty()
+                && (primaryDisplayBounds.getWidth() != bounds.getWidth()
+                    || primaryDisplayBounds.getHeight() != bounds.getHeight()))
+            {
+                localPos.x = ((float) eventPosition.x / (float) primaryDisplayBounds.getWidth()) * (float) bounds.getWidth();
+                localPos.y = ((float) eventPosition.y / (float) primaryDisplayBounds.getHeight()) * (float) bounds.getHeight();
+            }
+
+            return localPos;
         }
 
         void handleKeyboardEvent (int flags, int modifiers, int scan, int sym, int keyCap)
@@ -1435,6 +1642,16 @@ namespace
         int pointerEventCount = 0;
         int keyboardEventCount = 0;
         int sessionStateLogCount = 0;
+        struct ActiveTouchContact
+        {
+            int stableTouchId = 0;
+            int rawTouchId = -1;
+            Point<float> position;
+        };
+
+        std::map<int, ActiveTouchContact> activeTouchContacts;
+        int nextStableTouchId = 1;
+        static inline MultiTouchMapper<int> currentTouches;
         std::shared_ptr<PeerState> peerState = std::make_shared<PeerState>();
         TimedCallback repaintTimer { [this]() { dispatchDeferredRepaints(); } };
 
@@ -1499,7 +1716,7 @@ bool detail::MouseInputSourceList::addSource()
 
 bool detail::MouseInputSourceList::canUseTouch() const
 {
-    return false;
+    return true;
 }
 
 Point<float> MouseInputSource::getCurrentRawMousePosition()
@@ -1658,6 +1875,8 @@ void Displays::findDisplays (const Desktop&)
 
     Display display;
     display.isMain = true;
+    display.logicalBounds = displayArea.toFloat();
+    display.userBounds = display.logicalBounds;
     display.totalArea = displayArea;
     display.userArea = display.totalArea;
     display.scale = 1.0;

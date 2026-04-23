@@ -10,14 +10,14 @@ if "%TARGET%"=="" set TARGET=12.2.0,gcc_ntoaarch64le
 set ROOT=%~dp0..\..
 for %%I in ("%ROOT%") do set ROOT=%%~fI
 set TARGET_DIR=%TARGET:,=_%
-set BUILD_DIR=%ROOT%\build\qnx_hello_world\%TARGET_DIR%
+set BUILD_DIR=%ROOT%\build\qnx_desktop_window_demo\%TARGET_DIR%
 set GENERATED_HEADER=%BUILD_DIR%\GeneratedBuildVersion.h
 
 if not exist "%BUILD_DIR%" mkdir "%BUILD_DIR%"
 
-cmake -DROOT="%ROOT%" -DOUTPUT_HEADER="%GENERATED_HEADER%" -P "%ROOT%\extras\QNXHelloWorld\cmake\GenerateBuildVersion.cmake" || exit /b 1
+cmake -DROOT="%ROOT%" -DOUTPUT_HEADER="%GENERATED_HEADER%" -P "%ROOT%\extras\QNXDesktopWindowDemo\cmake\GenerateBuildVersion.cmake" || exit /b 1
 
-set COMMON=-V%TARGET% -std=gnu++17 -DJUCE_GLOBAL_MODULE_SETTINGS_INCLUDED=1 -DJUCE_USE_CURL=0 -DJUCE_WEB_BROWSER=0 -DJUCE_JACK=0 -DJUCE_ALSA=1 -DJUCE_USE_FONTCONFIG=0 -I"%ROOT%" -I"%ROOT%\modules" -I"%BUILD_DIR%"
+set COMMON=-V%TARGET% -std=gnu++17 -DJUCE_GLOBAL_MODULE_SETTINGS_INCLUDED=1 -DJUCE_USE_CURL=0 -DJUCE_WEB_BROWSER=0 -DJUCE_JACK=0 -DJUCE_USE_FONTCONFIG=0 -I"%ROOT%" -I"%ROOT%\modules" -I"%BUILD_DIR%"
 
 q++ %COMMON% -c "%ROOT%\modules\juce_core\juce_core.cpp" -o "%BUILD_DIR%\juce_core.o" || exit /b 1
 q++ %COMMON% -c "%ROOT%\modules\juce_core\juce_core_CompilationTime.cpp" -o "%BUILD_DIR%\juce_core_CompilationTime.o" || exit /b 1
@@ -27,11 +27,11 @@ q++ %COMMON% -c "%ROOT%\modules\juce_graphics\juce_graphics_Harfbuzz.cpp" -o "%B
 qcc -V%TARGET% -DSB_CONFIG_UNITY=1 -I"%ROOT%" -I"%ROOT%\modules" -c "%ROOT%\modules\juce_graphics\unicode\sheenbidi\Source\SheenBidi.c" -o "%BUILD_DIR%\SheenBidi.o" || exit /b 1
 q++ %COMMON% -c "%ROOT%\modules\juce_data_structures\juce_data_structures.cpp" -o "%BUILD_DIR%\juce_data_structures.o" || exit /b 1
 q++ %COMMON% -c "%ROOT%\modules\juce_gui_basics\juce_gui_basics.cpp" -o "%BUILD_DIR%\juce_gui_basics.o" || exit /b 1
-q++ %COMMON% -c "%ROOT%\modules\juce_gui_extra\juce_gui_extra.cpp" -o "%BUILD_DIR%\juce_gui_extra.o" || exit /b 1
-q++ %COMMON% -c "%ROOT%\modules\juce_audio_basics\juce_audio_basics.cpp" -o "%BUILD_DIR%\juce_audio_basics.o" || exit /b 1
-q++ %COMMON% -c "%ROOT%\modules\juce_audio_devices\juce_audio_devices.cpp" -o "%BUILD_DIR%\juce_audio_devices.o" || exit /b 1
-q++ %COMMON% -c "%ROOT%\modules\juce_osc\juce_osc.cpp" -o "%BUILD_DIR%\juce_osc.o" || exit /b 1
-q++ %COMMON% -c "%ROOT%\extras\QNXHelloWorld\Source\Main.cpp" -o "%BUILD_DIR%\Main.o" || exit /b 1
+q++ %COMMON% -c "%ROOT%\modules\juce_gui_basics\juce_gui_basics_2.cpp" -o "%BUILD_DIR%\juce_gui_basics_2.o" || exit /b 1
+q++ %COMMON% -c "%ROOT%\modules\juce_gui_basics\juce_gui_basics_3.cpp" -o "%BUILD_DIR%\juce_gui_basics_3.o" || exit /b 1
+q++ %COMMON% -c "%ROOT%\modules\juce_gui_basics\juce_gui_basics_4.cpp" -o "%BUILD_DIR%\juce_gui_basics_4.o" || exit /b 1
+q++ %COMMON% -c "%ROOT%\modules\juce_gui_basics\juce_gui_basics_5.cpp" -o "%BUILD_DIR%\juce_gui_basics_5.o" || exit /b 1
+q++ %COMMON% -c "%ROOT%\extras\QNXDesktopWindowDemo\Source\Main.cpp" -o "%BUILD_DIR%\Main.o" || exit /b 1
 
 q++ -V%TARGET% ^
     "%BUILD_DIR%\juce_core.o" ^
@@ -42,12 +42,12 @@ q++ -V%TARGET% ^
     "%BUILD_DIR%\SheenBidi.o" ^
     "%BUILD_DIR%\juce_data_structures.o" ^
     "%BUILD_DIR%\juce_gui_basics.o" ^
-    "%BUILD_DIR%\juce_gui_extra.o" ^
-    "%BUILD_DIR%\juce_audio_basics.o" ^
-    "%BUILD_DIR%\juce_audio_devices.o" ^
-    "%BUILD_DIR%\juce_osc.o" ^
+    "%BUILD_DIR%\juce_gui_basics_2.o" ^
+    "%BUILD_DIR%\juce_gui_basics_3.o" ^
+    "%BUILD_DIR%\juce_gui_basics_4.o" ^
+    "%BUILD_DIR%\juce_gui_basics_5.o" ^
     "%BUILD_DIR%\Main.o" ^
-    -lscreen -lasound -lsocket -lz -lexpat ^
-    -o "%BUILD_DIR%\JUCEQNXHelloWorld" || exit /b 1
+    -lscreen -lsocket -lz -lexpat ^
+    -o "%BUILD_DIR%\JUCEQNXDesktopWindowDemo" || exit /b 1
 
-echo Built: %BUILD_DIR%\JUCEQNXHelloWorld
+echo Built: %BUILD_DIR%\JUCEQNXDesktopWindowDemo
