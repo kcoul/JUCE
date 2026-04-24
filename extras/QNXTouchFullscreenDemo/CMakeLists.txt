@@ -62,6 +62,7 @@ endif()
 target_link_libraries(JUCEQNXTouchFullscreenDemo PRIVATE
     juce::juce_audio_devices
     juce::juce_gui_basics
+    juce::juce_opengl
     juce::juce_osc
     juce::juce_recommended_config_flags
     juce::juce_recommended_lto_flags
@@ -69,6 +70,8 @@ target_link_libraries(JUCEQNXTouchFullscreenDemo PRIVATE
     screen
     asound
     socket
+    EGL
+    GLESv2
     z
     expat)
 

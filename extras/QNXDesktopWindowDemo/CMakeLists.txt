@@ -60,11 +60,14 @@ endif()
 
 target_link_libraries(JUCEQNXDesktopWindowDemo PRIVATE
     juce::juce_gui_basics
+    juce::juce_opengl
     juce::juce_recommended_config_flags
     juce::juce_recommended_lto_flags
     juce::juce_recommended_warning_flags
     screen
     socket
+    EGL
+    GLESv2
     z
     expat)
 

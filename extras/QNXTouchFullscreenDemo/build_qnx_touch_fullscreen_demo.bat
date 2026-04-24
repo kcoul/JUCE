@@ -32,6 +32,7 @@ q++ %COMMON% -c "%ROOT%\modules\juce_gui_basics\juce_gui_basics_2.cpp" -o "%BUIL
 q++ %COMMON% -c "%ROOT%\modules\juce_gui_basics\juce_gui_basics_3.cpp" -o "%BUILD_DIR%\juce_gui_basics_3.o" || exit /b 1
 q++ %COMMON% -c "%ROOT%\modules\juce_gui_basics\juce_gui_basics_4.cpp" -o "%BUILD_DIR%\juce_gui_basics_4.o" || exit /b 1
 q++ %COMMON% -c "%ROOT%\modules\juce_gui_basics\juce_gui_basics_5.cpp" -o "%BUILD_DIR%\juce_gui_basics_5.o" || exit /b 1
+q++ %COMMON% -c "%ROOT%\modules\juce_opengl\juce_opengl.cpp" -o "%BUILD_DIR%\juce_opengl.o" || exit /b 1
 q++ %COMMON% -c "%ROOT%\modules\juce_audio_basics\juce_audio_basics.cpp" -o "%BUILD_DIR%\juce_audio_basics.o" || exit /b 1
 q++ %COMMON% -c "%ROOT%\modules\juce_audio_devices\juce_audio_devices.cpp" -o "%BUILD_DIR%\juce_audio_devices.o" || exit /b 1
 q++ %COMMON% -c "%ROOT%\modules\juce_osc\juce_osc.cpp" -o "%BUILD_DIR%\juce_osc.o" || exit /b 1
@@ -50,11 +51,12 @@ q++ -V%TARGET% ^
     "%BUILD_DIR%\juce_gui_basics_3.o" ^
     "%BUILD_DIR%\juce_gui_basics_4.o" ^
     "%BUILD_DIR%\juce_gui_basics_5.o" ^
+    "%BUILD_DIR%\juce_opengl.o" ^
     "%BUILD_DIR%\juce_audio_basics.o" ^
     "%BUILD_DIR%\juce_audio_devices.o" ^
     "%BUILD_DIR%\juce_osc.o" ^
     "%BUILD_DIR%\Main.o" ^
-    -lscreen -lasound -lsocket -lz -lexpat "%FREETYPE_LIB%" ^
+    -lscreen -lasound -lsocket -lEGL -lGLESv2 -lz -lexpat "%FREETYPE_LIB%" ^
     -o "%BUILD_DIR%\JUCEQNXTouchFullscreenDemo" || exit /b 1
 
 echo Built: %BUILD_DIR%\JUCEQNXTouchFullscreenDemo

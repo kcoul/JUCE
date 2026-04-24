@@ -121,6 +121,12 @@ namespace
         return enabled;
     }
 
+    bool isExperimentalQnxOpenGLEnabled()
+    {
+        static const bool enabled = SystemStats::getEnvironmentVariable ("JUCE_QNX_ENABLE_OPENGL", {}) == "1";
+        return enabled;
+    }
+
     ModifierKeys qnxModifiersFromButtons (int buttons)
     {
         auto mods = ModifierKeys::getCurrentModifiersRealtime().withoutMouseButtons();
@@ -826,6 +832,15 @@ namespace
         {
             if (pendingRepaintArea.isEmpty())
                 return;
+
+            if (isExperimentalQnxOpenGLEnabled() && component.getCachedComponentImage() != nullptr)
+            {
+                if (repaintDispatchCount <= 5 || (repaintDispatchCount % 60) == 0)
+                    logQnxWindowing ("Skipping software repaint because component has a cached OpenGL image attached");
+
+                pendingRepaintArea = {};
+                return;
+            }
 
             const ScopedValueSetter<bool> repaintSetter (isPerformingRepaint, true);
 

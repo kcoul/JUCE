@@ -111,6 +111,8 @@
 
 #elif JUCE_QNX
  #include <EGL/egl.h>
+ #include <EGL/eglext.h>
+ #include <screen/screen.h>
 #endif
 
 //==============================================================================

@@ -32,6 +32,7 @@ q++ %COMMON% -c "%ROOT%\modules\juce_gui_basics\juce_gui_basics_2.cpp" -o "%BUIL
 q++ %COMMON% -c "%ROOT%\modules\juce_gui_basics\juce_gui_basics_3.cpp" -o "%BUILD_DIR%\juce_gui_basics_3.o" || exit /b 1
 q++ %COMMON% -c "%ROOT%\modules\juce_gui_basics\juce_gui_basics_4.cpp" -o "%BUILD_DIR%\juce_gui_basics_4.o" || exit /b 1
 q++ %COMMON% -c "%ROOT%\modules\juce_gui_basics\juce_gui_basics_5.cpp" -o "%BUILD_DIR%\juce_gui_basics_5.o" || exit /b 1
+q++ %COMMON% -c "%ROOT%\modules\juce_opengl\juce_opengl.cpp" -o "%BUILD_DIR%\juce_opengl.o" || exit /b 1
 q++ %COMMON% -c "%ROOT%\extras\QNXDesktopWindowDemo\Source\Main.cpp" -o "%BUILD_DIR%\Main.o" || exit /b 1
 
 q++ -V%TARGET% ^
@@ -47,8 +48,9 @@ q++ -V%TARGET% ^
     "%BUILD_DIR%\juce_gui_basics_3.o" ^
     "%BUILD_DIR%\juce_gui_basics_4.o" ^
     "%BUILD_DIR%\juce_gui_basics_5.o" ^
+    "%BUILD_DIR%\juce_opengl.o" ^
     "%BUILD_DIR%\Main.o" ^
-    -lscreen -lsocket -lz -lexpat "%FREETYPE_LIB%" ^
+    -lscreen -lsocket -lEGL -lGLESv2 -lz -lexpat "%FREETYPE_LIB%" ^
     -o "%BUILD_DIR%\JUCEQNXDesktopWindowDemo" || exit /b 1
 
 echo Built: %BUILD_DIR%\JUCEQNXDesktopWindowDemo

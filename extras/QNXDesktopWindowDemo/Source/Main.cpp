@@ -1,5 +1,8 @@
 #include <juce_gui_basics/juce_gui_basics.h>
+#include <juce_opengl/juce_opengl.h>
 #include <unistd.h>
+
+#include <atomic>
 
 #include "GeneratedBuildVersion.h"
 
@@ -7,6 +10,11 @@ namespace
 {
     constexpr int fallbackWidth = 1280;
     constexpr int fallbackHeight = 1024;
+
+    bool shouldEnableOpenGLRenderer()
+    {
+        return juce::SystemStats::getEnvironmentVariable ("JUCE_QNX_ENABLE_OPENGL", {}) == "1";
+    }
 
     class FpsCounter
     {
@@ -76,7 +84,9 @@ namespace
                                                    512 * 1024);
     }
 
-    class DesktopContentComponent final : public juce::Component
+    class DesktopContentComponent final : public juce::Component,
+                                          private juce::OpenGLRenderer,
+                                          private juce::Timer
     {
     public:
         DesktopContentComponent()
@@ -86,15 +96,29 @@ namespace
             closeButton.setButtonText ("Close");
             closeButton.onClick = [] { juce::JUCEApplication::getInstance()->systemRequestedQuit(); };
             addAndMakeVisible (closeButton);
+
+            if (shouldEnableOpenGLRenderer())
+            {
+                openGLRequested = true;
+                startTimerHz (30);
+                tryAttachOpenGLIfReady();
+            }
+            else
+            {
+                juce::Logger::writeToLog ("OpenGL renderer disabled; set JUCE_QNX_ENABLE_OPENGL=1 to test EGL path");
+            }
         }
 
         ~DesktopContentComponent() override
         {
+            shutdownOpenGL();
         }
 
         void paint (juce::Graphics& g) override
         {
-            fpsCounter.frameRendered();
+            if (! isOpenGLActive.load())
+                fpsCounter.frameRendered();
+
             g.fillAll (juce::Colour::fromRGB (238, 232, 221));
 
             auto bounds = getLocalBounds().toFloat().reduced (20.0f);
@@ -109,6 +133,17 @@ namespace
             auto bounds = getLocalBounds().reduced (48, 40);
             auto topRow = bounds.removeFromTop (40);
             closeButton.setBounds (topRow.removeFromRight (110));
+            tryAttachOpenGLIfReady();
+        }
+
+        void visibilityChanged() override
+        {
+            tryAttachOpenGLIfReady();
+        }
+
+        void parentHierarchyChanged() override
+        {
+            tryAttachOpenGLIfReady();
         }
 
     private:
@@ -138,11 +173,94 @@ namespace
 
             g.setColour (juce::Colours::white.withAlpha (0.95f));
             g.setFont (juce::FontOptions (17.0f));
-            g.drawText (fpsCounter.getSummaryText ("SW"), textBounds, juce::Justification::centredLeft);
+            g.drawText (fpsCounter.getSummaryText (isOpenGLActive.load() ? "GL" : "SW"),
+                        textBounds,
+                        juce::Justification::centredLeft);
+        }
+
+        void newOpenGLContextCreated() override
+        {
+            isOpenGLActive = true;
+            juce::Logger::writeToLog ("OpenGL context created for desktop demo");
+            requestVisualRefresh();
+        }
+
+        void renderOpenGL() override
+        {
+            fpsCounter.frameRendered();
+        }
+
+        void openGLContextClosing() override
+        {
+            isOpenGLActive = false;
+            juce::Logger::writeToLog ("OpenGL context closing for desktop demo");
+        }
+
+        void timerCallback() override
+        {
+            if (isOpenGLActive.load())
+            {
+                repaint();
+                return;
+            }
+
+            tryAttachOpenGLIfReady();
+
+            if (openGLAttachAttempted && ! isOpenGLActive.load())
+            {
+                const auto elapsedMs = juce::Time::getMillisecondCounterHiRes() - openGLAttachStartMs;
+
+                if (elapsedMs > 1500.0)
+                {
+                    juce::Logger::writeToLog ("OpenGL context was not created within 1500ms; reverting to software renderer");
+                    shutdownOpenGL();
+                    requestVisualRefresh();
+                    stopTimer();
+                }
+            }
+        }
+
+        void tryAttachOpenGLIfReady()
+        {
+            if (! openGLRequested || openGLAttachAttempted || isOpenGLActive.load())
+                return;
+
+            if (getPeer() == nullptr || ! isShowing() || getWidth() <= 0 || getHeight() <= 0)
+                return;
+
+            openGLAttachAttempted = true;
+            openGLAttachStartMs = juce::Time::getMillisecondCounterHiRes();
+            openGLContext.setRenderer (this);
+            openGLContext.setComponentPaintingEnabled (true);
+            openGLContext.setContinuousRepainting (true);
+            openGLContext.attachTo (*this);
+            juce::Logger::writeToLog ("Requested OpenGL context attachment");
+        }
+
+        void shutdownOpenGL()
+        {
+            openGLContext.detach();
+            openGLContext.setRenderer (nullptr);
+            isOpenGLActive = false;
+            openGLAttachAttempted = false;
+            openGLRequested = false;
+        }
+
+        void requestVisualRefresh()
+        {
+            if (isOpenGLActive.load())
+                openGLContext.triggerRepaint();
+            else
+                repaint();
         }
 
         juce::TextButton closeButton;
         FpsCounter fpsCounter;
+        juce::OpenGLContext openGLContext;
+        std::atomic<bool> isOpenGLActive { false };
+        bool openGLRequested = false;
+        bool openGLAttachAttempted = false;
+        double openGLAttachStartMs = 0.0;
     };
 
     class MainWindow final : public juce::DocumentWindow
@@ -151,7 +269,7 @@ namespace
         MainWindow()
             : juce::DocumentWindow ("JUCE QNX Desktop Window Demo",
                                     juce::Colour::fromRGB (26, 39, 51),
-                                    juce::DocumentWindow::allButtons,
+                                    juce::DocumentWindow::closeButton,
                                     true)
         {
             setUsingNativeTitleBar (false);

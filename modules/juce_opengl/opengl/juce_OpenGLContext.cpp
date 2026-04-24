@@ -38,6 +38,16 @@
  #include <juce_gui_basics/native/juce_PerScreenDisplayLinks_mac.h>
 #endif
 
+#if JUCE_QNX
+namespace juce
+{
+static void logQnxOpenGLContext (const String& message)
+{
+    Logger::writeToLog ("[QNX OpenGLContext] " + message);
+}
+}
+#endif
+
 namespace juce
 {
 
@@ -468,7 +478,7 @@ public:
             });
 
             const auto newArea = globalArea.withZeroOrigin() * displayScale;
-           #elif JUCE_WINDOWS || JUCE_LINUX || JUCE_BSD
+           #elif JUCE_WINDOWS || JUCE_LINUX || JUCE_BSD || JUCE_QNX
             const auto globalArea = detail::ScalingHelpers::scaledScreenPosToUnscaled (component, logicalArea);
             const auto newArea = (globalArea.toFloat() * peer->getPlatformScaleFactor()).withZeroOrigin().toNearestInt();
            #elif JUCE_IOS || JUCE_ANDROID
@@ -635,17 +645,27 @@ public:
         associatedObjects.clear();
         cachedImageFrameBuffer.release();
 
+#if JUCE_QNX
+        logQnxOpenGLContext ("initialiseOnThread: activating context");
+#endif
         activator.activate (context);
 
+#if JUCE_QNX
+        logQnxOpenGLContext ("initialiseOnThread: native initialiseOnRenderThread");
+#endif
         if (const auto nativeResult = nativeContext->initialiseOnRenderThread (context); nativeResult != InitResult::success)
             return nativeResult;
 
-       #if JUCE_ANDROID
-        // On android the context may be created in initialiseOnRenderThread
-        // and we therefore need to call makeActive again
+       #if JUCE_ANDROID || JUCE_QNX
+        // On Android and QNX the native surface/context may be created in
+        // initialiseOnRenderThread(), so we need to bind it again here before
+        // issuing any GL calls.
         context.makeActive();
        #endif
 
+#if JUCE_QNX
+        logQnxOpenGLContext ("initialiseOnThread: gl::loadFunctions");
+#endif
         gl::loadFunctions();
 
        #if JUCE_DEBUG && ! JUCE_DISABLE_ASSERTIONS
@@ -665,8 +685,20 @@ public:
        #endif
 
         const auto currentViewportArea = areaAndScale.get().area;
+#if JUCE_QNX
+        logQnxOpenGLContext ("initialiseOnThread: glViewport "
+                             + String (currentViewportArea.getWidth()) + "x" + String (currentViewportArea.getHeight()));
+        logQnxOpenGLContext ("initialiseOnThread: glViewport ptr="
+                             + String::toHexString ((pointer_sized_uint) reinterpret_cast<void*> (gl::glViewport)));
+#endif
         glViewport (0, 0, currentViewportArea.getWidth(), currentViewportArea.getHeight());
+#if JUCE_QNX
+        logQnxOpenGLContext ("initialiseOnThread: glViewport returned");
+#endif
 
+#if JUCE_QNX
+        logQnxOpenGLContext ("initialiseOnThread: setSwapInterval(1)");
+#endif
         nativeContext->setSwapInterval (1);
 
        #if ! JUCE_OPENGL_ES
@@ -675,15 +707,26 @@ public:
         clearGLError();
        #endif
 
+#if JUCE_QNX
+        logQnxOpenGLContext ("initialiseOnThread: contextHasTextureNpotFeature");
+#endif
         textureNpotSupported = contextHasTextureNpotFeature();
 
         if (context.renderer != nullptr)
+        {
+#if JUCE_QNX
+            logQnxOpenGLContext ("initialiseOnThread: renderer->newOpenGLContextCreated");
+#endif
             context.renderer->newOpenGLContextCreated();
+        }
 
        #if JUCE_ANDROID
         nativeContext->notifyDidResume();
        #endif
 
+#if JUCE_QNX
+        logQnxOpenGLContext ("initialiseOnThread: success");
+#endif
         return InitResult::success;
     }
 
@@ -1379,13 +1422,22 @@ bool OpenGLContext::makeActive() const noexcept
 {
     auto& current = currentThreadActiveContext;
 
+#if JUCE_QNX
+    logQnxOpenGLContext ("OpenGLContext::makeActive enter");
+#endif
     if (nativeContext != nullptr && nativeContext->makeActive())
     {
         current = const_cast<OpenGLContext*> (this);
+#if JUCE_QNX
+        logQnxOpenGLContext ("OpenGLContext::makeActive success");
+#endif
         return true;
     }
 
     current = nullptr;
+#if JUCE_QNX
+    logQnxOpenGLContext ("OpenGLContext::makeActive failed");
+#endif
     return false;
 }
 

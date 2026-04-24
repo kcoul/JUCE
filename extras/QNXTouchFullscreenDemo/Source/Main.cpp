@@ -1,8 +1,10 @@
 #include <juce_gui_basics/juce_gui_basics.h>
+#include <juce_opengl/juce_opengl.h>
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_osc/juce_osc.h>
 #include <unistd.h>
 
+#include <atomic>
 #include <cmath>
 #include <map>
 #include <set>
@@ -20,6 +22,11 @@ namespace
     constexpr int fallbackWidth = 1280;
     constexpr int fallbackHeight = 1024;
     constexpr double voiceRampTimeSeconds = 0.008;
+
+    bool shouldEnableOpenGLRenderer()
+    {
+        return juce::SystemStats::getEnvironmentVariable ("JUCE_QNX_ENABLE_OPENGL", {}) == "1";
+    }
 
     juce::Rectangle<int> getInitialDisplayArea()
     {
@@ -205,6 +212,8 @@ namespace
 }
 
 class MainComponent final : public juce::Component,
+                            private juce::OpenGLRenderer,
+                            private juce::Timer,
                             private juce::OSCReceiver,
                             private juce::OSCReceiver::Listener<juce::OSCReceiver::MessageLoopCallback>
 {
@@ -241,6 +250,10 @@ public:
                                   + juce::String (getHeight()));
 
         initialiseOscControl();
+        if (shouldEnableOpenGLRenderer())
+            startOpenGLAttachPolling();
+        else
+            juce::Logger::writeToLog ("OpenGL renderer disabled; set JUCE_QNX_ENABLE_OPENGL=1 to test EGL path");
         updateStatusText ("Ready");
         grabKeyboardFocus();
     }
@@ -248,6 +261,7 @@ public:
     ~MainComponent() override
     {
         juce::Logger::writeToLog ("MainComponent shutting down");
+        shutdownOpenGL();
         removeListener (this);
         disconnect();
         synthSource.clearAllVoices();
@@ -258,7 +272,9 @@ public:
 
     void paint (juce::Graphics& g) override
     {
-        fpsCounter.frameRendered();
+        if (! isOpenGLActive.load())
+            fpsCounter.frameRendered();
+
         g.fillAll (juce::Colour::fromRGB (242, 236, 225));
 
         auto panel = getLocalBounds().toFloat().reduced (24.0f);
@@ -421,6 +437,21 @@ public:
         return false;
     }
 
+    void visibilityChanged() override
+    {
+        tryAttachOpenGLIfReady();
+    }
+
+    void parentHierarchyChanged() override
+    {
+        tryAttachOpenGLIfReady();
+    }
+
+    void resized() override
+    {
+        tryAttachOpenGLIfReady();
+    }
+
 private:
     struct ActivePointer
     {
@@ -497,7 +528,7 @@ private:
         drawDiagnosticCard (g,
                             getFpsOverlayBounds(),
                             "Renderer",
-                            fpsCounter.getSummaryText ("SW"),
+                            fpsCounter.getSummaryText (isOpenGLActive.load() ? "GL" : "SW"),
                             juce::Colour::fromRGB (239, 196, 76));
 
         drawDiagnosticCard (g,
@@ -631,7 +662,7 @@ private:
                                       + "," + juce::String ((int) position.y));
         }
 
-        repaint();
+        requestVisualRefresh();
     }
 
     void releasePointer (const juce::MouseEvent& event)
@@ -642,7 +673,7 @@ private:
         activePointers.erase (sourceId);
 
         updateStatusText ((wasTouch ? "touch#" + juce::String (sourceId - 1) : "mouse") + " up");
-        repaint();
+        requestVisualRefresh();
     }
 
     void logCurrentAudioDevice (const juce::String& context) const
@@ -773,6 +804,47 @@ private:
         return 1.0f;
     }
 
+    void initialiseOpenGL()
+    {
+        if (openGLAttachAttempted)
+            return;
+
+        openGLAttachAttempted = true;
+        openGLAttachStartMs = juce::Time::getMillisecondCounterHiRes();
+        openGLContext.setRenderer (this);
+        openGLContext.setComponentPaintingEnabled (true);
+        openGLContext.setContinuousRepainting (true);
+        openGLContext.attachTo (*this);
+        juce::Logger::writeToLog ("Requested OpenGL context attachment");
+    }
+
+    void shutdownOpenGL()
+    {
+        openGLContext.detach();
+        openGLContext.setRenderer (nullptr);
+        isOpenGLActive = false;
+        openGLAttachAttempted = false;
+        openGLRequested = false;
+    }
+
+    void newOpenGLContextCreated() override
+    {
+        isOpenGLActive = true;
+        juce::Logger::writeToLog ("OpenGL context created for touch demo");
+        requestVisualRefresh();
+    }
+
+    void renderOpenGL() override
+    {
+        fpsCounter.frameRendered();
+    }
+
+    void openGLContextClosing() override
+    {
+        isOpenGLActive = false;
+        juce::Logger::writeToLog ("OpenGL context closing for touch demo");
+    }
+
     void preferUsbAudioOutput()
     {
         const auto& deviceTypes = deviceManager.getAvailableDeviceTypes();
@@ -835,6 +907,56 @@ private:
             juce::Logger::writeToLog ("Failed to select USB audio output device '" + usbDeviceName + "': " + setupError);
     }
 
+    void startOpenGLAttachPolling()
+    {
+        openGLRequested = true;
+        startTimerHz (30);
+        tryAttachOpenGLIfReady();
+    }
+
+    void tryAttachOpenGLIfReady()
+    {
+        if (! openGLRequested || openGLAttachAttempted || isOpenGLActive.load())
+            return;
+
+        if (getPeer() == nullptr || ! isShowing() || getWidth() <= 0 || getHeight() <= 0)
+            return;
+
+        initialiseOpenGL();
+    }
+
+    void timerCallback() override
+    {
+        if (isOpenGLActive.load())
+        {
+            repaint();
+            return;
+        }
+
+        tryAttachOpenGLIfReady();
+
+        if (openGLAttachAttempted && ! isOpenGLActive.load())
+        {
+            const auto elapsedMs = juce::Time::getMillisecondCounterHiRes() - openGLAttachStartMs;
+
+            if (elapsedMs > 1500.0)
+            {
+                juce::Logger::writeToLog ("OpenGL context was not created within 1500ms; reverting to software renderer");
+                shutdownOpenGL();
+                requestVisualRefresh();
+                stopTimer();
+            }
+        }
+    }
+
+    void requestVisualRefresh()
+    {
+        if (isOpenGLActive.load())
+            openGLContext.triggerRepaint();
+        else
+            repaint();
+    }
+
     juce::AudioDeviceManager deviceManager;
     juce::AudioSourcePlayer player;
     TouchSynthAudioSource synthSource;
@@ -843,6 +965,11 @@ private:
     juce::String lastError;
     juce::String statusText;
     FpsCounter fpsCounter;
+    juce::OpenGLContext openGLContext;
+    std::atomic<bool> isOpenGLActive { false };
+    bool openGLRequested = false;
+    bool openGLAttachAttempted = false;
+    double openGLAttachStartMs = 0.0;
     bool audioReady = false;
     bool keyboardHeld = false;
 

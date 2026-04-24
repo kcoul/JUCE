@@ -35,6 +35,11 @@
 namespace juce
 {
 
+static void logQnxOpenGL (const String& message)
+{
+    Logger::writeToLog ("[QNX OpenGL] " + message);
+}
+
 class OpenGLContext::NativeContext
 {
 public:
@@ -54,11 +59,34 @@ public:
         nativeWindow = reinterpret_cast<EGLNativeWindowType> (peer->getNativeHandle());
 
         if (nativeWindow == EGLNativeWindowType{})
+        {
+            logQnxOpenGL ("Native window handle is null");
             return;
+        }
+
+        if (screen_get_window_property_pv (reinterpret_cast<screen_window_t> (nativeWindow),
+                                           SCREEN_PROPERTY_CONTEXT,
+                                           reinterpret_cast<void**> (&nativeDisplay)) != 0
+            || nativeDisplay == EGLNativeDisplayType{})
+        {
+            logQnxOpenGL ("Failed to query SCREEN_PROPERTY_CONTEXT for native window");
+            nativeDisplay = EGLNativeDisplayType{};
+            return;
+        }
+
+        if (screen_get_window_property_pv (reinterpret_cast<screen_window_t> (nativeWindow),
+                                           SCREEN_PROPERTY_DISPLAY,
+                                           reinterpret_cast<void**> (&nativeScreenDisplay)) != 0
+            || nativeScreenDisplay == nullptr)
+        {
+            logQnxOpenGL ("Failed to query SCREEN_PROPERTY_DISPLAY for native window");
+            nativeScreenDisplay = nullptr;
+        }
 
         if (! initEGLDisplay (pixelFormat, useMultisamplingIn, version))
             return;
 
+        logQnxOpenGL ("Initialised EGL display for native Screen window");
         hasInitialised = true;
     }
 
@@ -81,7 +109,10 @@ public:
         surface = eglCreateWindowSurface (display, config, nativeWindow, surfaceAttributes.data());
 
         if (surface == EGL_NO_SURFACE)
+        {
+            logQnxOpenGL ("eglCreateWindowSurface failed, error=0x" + String::toHexString ((int) eglGetError()));
             return InitResult::fatal;
+        }
 
         std::array<EGLint, 5> contextAttributes
         {
@@ -96,10 +127,12 @@ public:
 
         if (context == EGL_NO_CONTEXT)
         {
+            logQnxOpenGL ("eglCreateContext failed, error=0x" + String::toHexString ((int) eglGetError()));
             destroySurface();
             return InitResult::fatal;
         }
 
+        logQnxOpenGL ("Created EGL context and window surface");
         juceContext = &c;
         return InitResult::success;
     }
@@ -117,9 +150,22 @@ public:
     {
         const ScopedLock lock (mutex);
 
-        return surface != EGL_NO_SURFACE
-            && context != EGL_NO_CONTEXT
-            && eglMakeCurrent (display, surface, surface, context) == EGL_TRUE;
+        if (surface == EGL_NO_SURFACE || context == EGL_NO_CONTEXT)
+        {
+            logQnxOpenGL ("makeActive skipped because surface/context is not ready");
+            return false;
+        }
+
+        logQnxOpenGL ("Calling eglMakeCurrent");
+
+        if (eglMakeCurrent (display, surface, surface, context) == EGL_TRUE)
+        {
+            logQnxOpenGL ("eglMakeCurrent succeeded");
+            return true;
+        }
+
+        logQnxOpenGL ("eglMakeCurrent failed, error=0x" + String::toHexString ((int) eglGetError()));
+        return false;
     }
 
     bool isActive() const noexcept
@@ -139,22 +185,32 @@ public:
         const ScopedLock lock (mutex);
 
         if (surface != EGL_NO_SURFACE)
-            eglSwapBuffers (display, surface);
+        {
+            if (eglSwapBuffers (display, surface) != EGL_TRUE)
+                logQnxOpenGL ("eglSwapBuffers failed, error=0x" + String::toHexString ((int) eglGetError()));
+        }
     }
 
-    void updateWindowPosition (Rectangle<int>) {}
+    void updateWindowPosition() {}
 
     bool setSwapInterval (int numFramesPerSwap)
     {
         const ScopedLock lock (mutex);
 
         if (display == EGL_NO_DISPLAY)
+        {
+            logQnxOpenGL ("setSwapInterval skipped because display is not ready");
             return false;
+        }
 
         if (eglSwapInterval (display, numFramesPerSwap) != EGL_TRUE)
+        {
+            logQnxOpenGL ("eglSwapInterval failed, error=0x" + String::toHexString ((int) eglGetError()));
             return false;
+        }
 
         swapInterval = numFramesPerSwap;
+        logQnxOpenGL ("eglSwapInterval succeeded with interval=" + String (numFramesPerSwap));
         return true;
     }
 
@@ -209,20 +265,25 @@ private:
 
         if (sharedDisplay == EGL_NO_DISPLAY)
         {
-            auto nativeDisplay = static_cast<EGLNativeDisplayType> (0);
-            sharedDisplay = eglGetDisplay (nativeDisplay);
+            if (! tryInitDisplayWithPlatformScreen())
+                tryInitDisplayWithLegacyEntryPoint();
 
             if (sharedDisplay == EGL_NO_DISPLAY)
                 return false;
 
             if (eglInitialize (sharedDisplay, nullptr, nullptr) != EGL_TRUE)
             {
+                logQnxOpenGL ("eglInitialize failed, error=0x" + String::toHexString ((int) eglGetError()));
                 sharedDisplay = EGL_NO_DISPLAY;
                 return false;
             }
 
+            logClientExtensions();
+            logDisplayExtensions (sharedDisplay);
+
             if (eglBindAPI (EGL_OPENGL_ES_API) != EGL_TRUE)
             {
+                logQnxOpenGL ("eglBindAPI(EGL_OPENGL_ES_API) failed, error=0x" + String::toHexString ((int) eglGetError()));
                 eglTerminate (sharedDisplay);
                 sharedDisplay = EGL_NO_DISPLAY;
                 return false;
@@ -239,6 +300,61 @@ private:
 
         return tryChooseConfig (pixelFormat, multisampleAttributes)
             || tryChooseConfig (pixelFormat, {});
+    }
+
+    bool tryInitDisplayWithPlatformScreen()
+    {
+       #if defined(EGL_PLATFORM_SCREEN_QNX)
+        if (nativeScreenDisplay != nullptr)
+        {
+            logQnxOpenGL ("Trying eglGetPlatformDisplay(EGL_PLATFORM_SCREEN_QNX, nativeScreenDisplay)");
+            sharedDisplay = eglGetPlatformDisplay (EGL_PLATFORM_SCREEN_QNX,
+                                                   nativeScreenDisplay,
+                                                   nullptr);
+
+            if (sharedDisplay != EGL_NO_DISPLAY)
+                return true;
+
+            logQnxOpenGL ("eglGetPlatformDisplay(EGL_PLATFORM_SCREEN_QNX, nativeScreenDisplay) failed, error=0x"
+                          + String::toHexString ((int) eglGetError()));
+        }
+
+        logQnxOpenGL ("Trying eglGetPlatformDisplay(EGL_PLATFORM_SCREEN_QNX, nativeDisplay)");
+        sharedDisplay = eglGetPlatformDisplay (EGL_PLATFORM_SCREEN_QNX,
+                                               reinterpret_cast<void*> (nativeDisplay),
+                                               nullptr);
+
+        if (sharedDisplay != EGL_NO_DISPLAY)
+            return true;
+
+        logQnxOpenGL ("eglGetPlatformDisplay(EGL_PLATFORM_SCREEN_QNX, nativeDisplay) failed, error=0x"
+                      + String::toHexString ((int) eglGetError()));
+       #else
+        logQnxOpenGL ("EGL_PLATFORM_SCREEN_QNX not defined in headers");
+       #endif
+
+        return false;
+    }
+
+    void tryInitDisplayWithLegacyEntryPoint()
+    {
+        logQnxOpenGL ("Trying legacy eglGetDisplay(nativeDisplay)");
+        sharedDisplay = eglGetDisplay (nativeDisplay);
+
+        if (sharedDisplay == EGL_NO_DISPLAY)
+            logQnxOpenGL ("eglGetDisplay(nativeDisplay) failed, error=0x" + String::toHexString ((int) eglGetError()));
+    }
+
+    static void logClientExtensions()
+    {
+        if (const auto* extensions = eglQueryString (EGL_NO_DISPLAY, EGL_EXTENSIONS))
+            logQnxOpenGL ("EGL client extensions: " + String (extensions));
+    }
+
+    static void logDisplayExtensions (EGLDisplay displayToQuery)
+    {
+        if (const auto* extensions = eglQueryString (displayToQuery, EGL_EXTENSIONS))
+            logQnxOpenGL ("EGL display extensions: " + String (extensions));
     }
 
     void destroySurface()
@@ -267,6 +383,8 @@ private:
     EGLContext context = EGL_NO_CONTEXT;
     EGLContext contextToShareWith = EGL_NO_CONTEXT;
     EGLConfig config = nullptr;
+    EGLNativeDisplayType nativeDisplay = EGLNativeDisplayType{};
+    screen_display_t nativeScreenDisplay = nullptr;
     EGLNativeWindowType nativeWindow = EGLNativeWindowType{};
     OpenGLVersion versionRequired = OpenGLVersion::defaultGLVersion;
     int swapInterval = 0;
