@@ -50,6 +50,14 @@ target_compile_definitions(JUCEQNXDesktopWindowDemo PRIVATE
     JUCE_USE_FONTCONFIG=0
     SB_CONFIG_UNITY=1)
 
+if(DEFINED ENV{QNX_TARGET})
+    target_include_directories(JUCEQNXDesktopWindowDemo PRIVATE
+        "$ENV{QNX_TARGET}/usr/include/freetype2")
+
+    target_link_libraries(JUCEQNXDesktopWindowDemo PRIVATE
+        "$ENV{QNX_TARGET}/aarch64le/usr/lib/libfreetype.so.24")
+endif()
+
 target_link_libraries(JUCEQNXDesktopWindowDemo PRIVATE
     juce::juce_gui_basics
     juce::juce_recommended_config_flags

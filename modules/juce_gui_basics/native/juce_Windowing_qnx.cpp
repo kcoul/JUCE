@@ -109,6 +109,12 @@ namespace
         return pos;
     }
 
+    int getNextQnxWindowZOrder() noexcept
+    {
+        static std::atomic<int> nextZOrder { 100 };
+        return nextZOrder.fetch_add (1);
+    }
+
     bool& qnxScreenSaverEnabled()
     {
         static bool enabled = true;
@@ -787,6 +793,8 @@ namespace
 
         void toFront (bool takeKeyboardFocus) override
         {
+            nativeZOrder = getNextQnxWindowZOrder();
+            updateWindowState();
             handleBroughtToFront();
 
             if (takeKeyboardFocus)
@@ -1280,7 +1288,7 @@ namespace
             if (nativeWindow == nullptr)
                 return;
 
-            const int position[2] { 0, 0 };
+            const int position[2] { bounds.getX(), bounds.getY() };
             const int size[2] { jmax (1, bounds.getWidth()), jmax (1, bounds.getHeight()) };
             const int zOrder = 1000;
             const int visible = isVisible ? 1 : 0;
@@ -1474,23 +1482,25 @@ namespace
             const int position[2] = { bounds.getX(), bounds.getY() };
             const int size[2] = { bounds.getWidth(), bounds.getHeight() };
             const int visible = isVisible ? 1 : 0;
+            const int zOrder = isAlwaysOnTop ? jmax (nativeZOrder, 10000) : nativeZOrder;
 
             screen_set_window_property_iv (nativeWindow, SCREEN_PROPERTY_POSITION, position);
             screen_set_window_property_iv (nativeWindow, SCREEN_PROPERTY_SIZE, size);
             screen_set_window_property_iv (nativeWindow, SCREEN_PROPERTY_VISIBLE, &visible);
+            screen_set_window_property_iv (nativeWindow, SCREEN_PROPERTY_ZORDER, &zOrder);
             updateEmbeddedInputSessions();
             flushScreenContext ("updateWindowState");
 
             int hasFocus = 0;
             int hasPointerFocus = 0;
-            int zOrder = 0;
+            int actualZOrder = 0;
             int status = 0;
             int type = 0;
             int sensitivity = 0;
             int ownerPid = -1;
             screen_get_window_property_iv (nativeWindow, SCREEN_PROPERTY_FOCUS, &hasFocus);
             screen_get_window_property_iv (nativeWindow, SCREEN_PROPERTY_POINTER_FOCUS, &hasPointerFocus);
-            screen_get_window_property_iv (nativeWindow, SCREEN_PROPERTY_ZORDER, &zOrder);
+            screen_get_window_property_iv (nativeWindow, SCREEN_PROPERTY_ZORDER, &actualZOrder);
             screen_get_window_property_iv (nativeWindow, SCREEN_PROPERTY_STATUS, &status);
             screen_get_window_property_iv (nativeWindow, SCREEN_PROPERTY_TYPE, &type);
             screen_get_window_property_iv (nativeWindow, SCREEN_PROPERTY_SENSITIVITY, &sensitivity);
@@ -1540,7 +1550,7 @@ namespace
                              + " visible=" + String (visible)
                              + " focus=" + String (hasFocus)
                              + " pointerFocus=" + String (hasPointerFocus)
-                             + " zOrder=" + String (zOrder)
+                             + " zOrder=" + String (actualZOrder)
                              + " status=" + String (status)
                              + " type=" + String (type)
                              + " sensitivity=" + String (sensitivity)
@@ -1635,6 +1645,7 @@ namespace
         bool fullScreen = false;
         bool focused = false;
         bool isAlwaysOnTop = false;
+        int nativeZOrder = getNextQnxWindowZOrder();
         bool isPerformingRepaint = false;
         bool windowBuffersCreated = false;
         int repaintDispatchCount = 0;

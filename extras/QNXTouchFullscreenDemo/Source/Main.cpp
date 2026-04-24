@@ -54,6 +54,47 @@ namespace
         return juce::Colour::fromHSV (hue, 0.72f, 0.94f, 1.0f);
     }
 
+    class FpsCounter
+    {
+    public:
+        void frameRendered()
+        {
+            const auto nowMs = juce::Time::getMillisecondCounterHiRes();
+
+            if (lastFrameMs > 0.0)
+            {
+                const auto frameMs = juce::jmax (0.001, nowMs - lastFrameMs);
+                averageFrameMs += (frameMs - averageFrameMs) * smoothingFactor;
+            }
+
+            lastFrameMs = nowMs;
+            ++frameCount;
+        }
+
+        juce::String getSummaryText (const juce::String& rendererTag) const
+        {
+            if (frameCount < 2 || averageFrameMs <= 0.0)
+                return rendererTag + " FPS --";
+
+            return rendererTag + " FPS " + juce::String (1000.0 / averageFrameMs, 1);
+        }
+
+        double getFramesPerSecond() const
+        {
+            if (frameCount < 2 || averageFrameMs <= 0.0)
+                return 0.0;
+
+            return 1000.0 / averageFrameMs;
+        }
+
+    private:
+        static constexpr double smoothingFactor = 0.12;
+
+        double lastFrameMs = 0.0;
+        double averageFrameMs = 0.0;
+        int frameCount = 0;
+    };
+
     struct VoiceState
     {
         double frequency = 440.0;
@@ -217,6 +258,7 @@ public:
 
     void paint (juce::Graphics& g) override
     {
+        fpsCounter.frameRendered();
         g.fillAll (juce::Colour::fromRGB (242, 236, 225));
 
         auto panel = getLocalBounds().toFloat().reduced (24.0f);
@@ -259,23 +301,6 @@ public:
             }
         }
 
-        g.setColour (juce::Colour::fromRGBA (255, 255, 255, 215));
-        g.setFont (juce::FontOptions (29.0f));
-        g.drawText ("QNX Multitouch Synth Grid",
-                    panel.getX() + 24.0f,
-                    panel.getY() + 18.0f,
-                    panel.getWidth() - 48.0f,
-                    34.0f,
-                    juce::Justification::left);
-
-        g.setFont (juce::FontOptions (18.0f));
-        g.drawText ("Touch or drag across the grid. X selects pitch, Y sets velocity. Mouse still works for desktop bring-up.",
-                    panel.getX() + 24.0f,
-                    panel.getY() + 56.0f,
-                    panel.getWidth() - 48.0f,
-                    24.0f,
-                    juce::Justification::left);
-
         auto closeBounds = getCloseButtonBounds().toFloat();
         g.setColour (juce::Colour::fromRGBA (255, 255, 255, 24));
         g.fillRoundedRectangle (closeBounds, 12.0f);
@@ -297,12 +322,15 @@ public:
             g.setColour (touch.colour);
             g.fillEllipse (markerBounds);
 
-            g.setColour (juce::Colours::black.withAlpha (0.75f));
-            g.setFont (juce::FontOptions (16.0f));
-            g.drawText (touch.isTouch ? "T" + juce::String (sourceId - 1)
-                                      : "M",
-                        markerBounds,
-                        juce::Justification::centred);
+                if (touch.isTouch)
+                {
+                    g.setColour (juce::Colours::black.withAlpha (0.78f));
+                    g.setFont (juce::FontOptions (17.0f));
+                    g.drawFittedText (juce::String (sourceId - 1),
+                                      markerBounds.toNearestInt().reduced (10, 10),
+                                      juce::Justification::centred,
+                                      1);
+                }
         }
 
         g.setColour (juce::Colour::fromRGBA (255, 255, 255, 42));
@@ -334,6 +362,8 @@ public:
                         24.0f,
                         juce::Justification::left);
         }
+
+        drawFpsOverlay (g);
     }
 
     void mouseDown (const juce::MouseEvent& event) override
@@ -421,6 +451,60 @@ private:
     {
         auto bounds = getLocalBounds().reduced (48, 44);
         return { bounds.getRight() - 108, bounds.getY() + 10, 96, 34 };
+    }
+
+    juce::Rectangle<int> getFpsOverlayBounds() const
+    {
+        auto bounds = getLocalBounds().reduced (48, 44);
+        return { bounds.getX() + 12, bounds.getY() + 10, 104, 40 };
+    }
+
+    juce::Rectangle<int> getTouchCountOverlayBounds() const
+    {
+        auto bounds = getLocalBounds().reduced (48, 44);
+        return { bounds.getX() + 124, bounds.getY() + 10, 104, 40 };
+    }
+
+    void drawDiagnosticCard (juce::Graphics& g,
+                             juce::Rectangle<int> bounds,
+                             const juce::String& title,
+                             const juce::String& value,
+                             juce::Colour accent) const
+    {
+        const auto overlay = bounds.toFloat();
+
+        g.setColour (juce::Colour::fromRGBA (9, 18, 28, 170));
+        g.fillRoundedRectangle (overlay, 11.0f);
+        g.setColour (accent.withAlpha (0.70f));
+        g.drawRoundedRectangle (overlay, 11.0f, 1.0f);
+        g.setColour (accent.withAlpha (0.16f));
+        g.fillRoundedRectangle (overlay.reduced (6.0f), 8.0f);
+
+        auto textBounds = overlay.reduced (12.0f, 7.0f);
+        auto titleBounds = textBounds.removeFromTop (13.0f);
+
+        g.setColour (accent.withAlpha (0.88f));
+        g.setFont (juce::FontOptions (11.0f));
+        g.drawText (title, titleBounds, juce::Justification::centredLeft);
+
+        g.setColour (juce::Colours::white.withAlpha (0.95f));
+        g.setFont (juce::FontOptions (17.0f));
+        g.drawText (value, textBounds, juce::Justification::centredLeft);
+    }
+
+    void drawFpsOverlay (juce::Graphics& g) const
+    {
+        drawDiagnosticCard (g,
+                            getFpsOverlayBounds(),
+                            "Renderer",
+                            fpsCounter.getSummaryText ("SW"),
+                            juce::Colour::fromRGB (239, 196, 76));
+
+        drawDiagnosticCard (g,
+                            getTouchCountOverlayBounds(),
+                            "Touches",
+                            juce::String (countActiveTouches()),
+                            juce::Colour::fromRGB (118, 200, 255));
     }
 
     static int noteForCell (int column, int row)
@@ -758,6 +842,7 @@ private:
     std::set<int> activeOscNotes;
     juce::String lastError;
     juce::String statusText;
+    FpsCounter fpsCounter;
     bool audioReady = false;
     bool keyboardHeld = false;
 
