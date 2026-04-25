@@ -123,7 +123,13 @@ namespace
 
     bool isExperimentalQnxOpenGLEnabled()
     {
-        static const bool enabled = SystemStats::getEnvironmentVariable ("JUCE_QNX_ENABLE_OPENGL", {}) == "1";
+        static const bool enabled = SystemStats::getEnvironmentVariable ("JUCE_QNX_ENABLE_OPENGL", "1") != "0";
+        return enabled;
+    }
+
+    bool shouldUseEmbeddedFullscreenQnxWindow()
+    {
+        static const bool enabled = SystemStats::getEnvironmentVariable ("JUCE_QNX_EMBEDDED_FULLSCREEN", "0") == "1";
         return enabled;
     }
 
@@ -674,7 +680,9 @@ namespace
 
             usingSharedContext = true;
 
-            const auto windowType = SCREEN_APPLICATION_WINDOW | SCREEN_ROOT_WINDOW;
+            const auto embeddedFullscreen = shouldUseEmbeddedFullscreenQnxWindow();
+            const auto windowType = embeddedFullscreen ? (SCREEN_APPLICATION_WINDOW | SCREEN_ROOT_WINDOW)
+                                                       : SCREEN_APPLICATION_WINDOW;
 
             if (screen_create_window_type (&nativeWindow, screenContext, windowType) != 0)
             {
@@ -685,7 +693,9 @@ namespace
                 return;
             }
 
-            logQnxWindowing ("screen_create_window_type succeeded type=SCREEN_APPLICATION_WINDOW|SCREEN_ROOT_WINDOW");
+            logQnxWindowing ("screen_create_window_type succeeded type="
+                             + String (embeddedFullscreen ? "SCREEN_APPLICATION_WINDOW|SCREEN_ROOT_WINDOW"
+                                                          : "SCREEN_APPLICATION_WINDOW"));
 
             const int usage = SCREEN_USAGE_NATIVE | SCREEN_USAGE_READ | SCREEN_USAGE_WRITE
                             | SCREEN_USAGE_OPENGL_ES2 | SCREEN_USAGE_OPENGL_ES3;
@@ -711,8 +721,19 @@ namespace
             }
 
             attachWindowToPrimaryDisplay();
-            logQnxWindowing ("Embedded fullscreen mode active; skipping Screen window-manager/group setup");
-            createEmbeddedInputSessions();
+
+            if (embeddedFullscreen)
+            {
+                logQnxWindowing ("Embedded fullscreen mode active; skipping Screen window-manager/group setup");
+                createEmbeddedInputSessions();
+            }
+            else
+            {
+                logQnxWindowing ("Managed window mode active; using Screen application window");
+                ensureWindowGroupCreated();
+                requestWindowGroupFocus();
+            }
+
             updateWindowState();
             registerSharedQnxScreenWindow (nativeWindow, peerState);
             repaintTimer.startTimerHz (60);
@@ -833,10 +854,16 @@ namespace
             if (pendingRepaintArea.isEmpty())
                 return;
 
-            if (isExperimentalQnxOpenGLEnabled() && component.getCachedComponentImage() != nullptr)
+            if (! shouldUseSoftwarePresentation())
             {
+                if (windowBuffersCreated)
+                {
+                    logQnxWindowing ("Destroying software Screen buffers because software presentation is disabled");
+                    destroyWindowBuffers();
+                }
+
                 if (repaintDispatchCount <= 5 || (repaintDispatchCount % 60) == 0)
-                    logQnxWindowing ("Skipping software repaint because component has a cached OpenGL image attached");
+                    logQnxWindowing ("Skipping software repaint because software presentation is disabled");
 
                 pendingRepaintArea = {};
                 return;
@@ -869,6 +896,7 @@ namespace
 
     private:
         bool ownsWindow() const noexcept                                  { return attachedExternally == nullptr; }
+        bool shouldUseSoftwarePresentation() const noexcept               { return ! isExperimentalQnxOpenGLEnabled(); }
 
         void attachWindowToPrimaryDisplay()
         {
@@ -975,7 +1003,16 @@ namespace
 
         void dispatchDeferredRepaints()
         {
-            if (! isVisible || minimised || pendingRepaintArea.isEmpty())
+            if (! isVisible || minimised)
+                return;
+
+            if (! shouldUseSoftwarePresentation() && windowBuffersCreated)
+            {
+                logQnxWindowing ("Destroying software Screen buffers because software presentation is disabled");
+                destroyWindowBuffers();
+            }
+
+            if (pendingRepaintArea.isEmpty())
                 return;
 
             ++repaintDispatchCount;
@@ -995,7 +1032,14 @@ namespace
             ModifierKeys::currentModifiers = mods;
             qnxMousePosition() = eventPosition.toFloat();
 
-            if (++pointerEventCount <= 10 || (pointerEventCount % 50) == 0)
+            ++pointerEventCount;
+
+            const auto shouldLogPointerEvent = buttons != 0
+                                            || wheelTicks != 0
+                                            || pointerEventCount <= 10
+                                            || (pointerEventCount % 100) == 0;
+
+            if (shouldLogPointerEvent)
                 logQnxWindowing ("Pointer event pos="
                                  + String (eventPosition.x) + "," + String (eventPosition.y)
                                  + " local=" + String (roundToInt (localPos.x)) + "," + String (roundToInt (localPos.y))
@@ -1040,7 +1084,13 @@ namespace
             bool shouldSendCancel = false;
             static int touchEventLogCount = 0;
 
-            if (++touchEventLogCount <= 50 || (touchEventLogCount % 100) == 0)
+            ++touchEventLogCount;
+
+            const auto shouldLogTouchEvent = eventType != SCREEN_EVENT_MTOUCH_MOVE
+                                          || touchEventLogCount <= 20
+                                          || (touchEventLogCount % 100) == 0;
+
+            if (shouldLogTouchEvent)
             {
                 logQnxWindowing ("Touch event type="
                                  + String (qnxScreenEventTypeToString (eventType))
@@ -1449,6 +1499,17 @@ namespace
             {
                 logQnxWindowing ("ensureWindowReady failed: nativeWindow is null");
                 return false;
+            }
+
+            if (! shouldUseSoftwarePresentation())
+            {
+                if (windowBuffersCreated)
+                {
+                    logQnxWindowing ("Destroying software Screen buffers because software presentation is disabled");
+                    destroyWindowBuffers();
+                }
+
+                return true;
             }
 
             const auto requestedSize = Point<int> (bounds.getWidth(), bounds.getHeight());

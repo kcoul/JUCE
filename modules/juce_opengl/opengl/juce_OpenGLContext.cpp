@@ -374,7 +374,12 @@ public:
         if (! isFlagSet (stateToUse, StateFlags::pendingRender) && noAutomaticRepaint)
             return RenderStatus::noWork;
 
+       #if JUCE_QNX
+        const auto isUpdating = isFlagSet (stateToUse, StateFlags::paintComponents)
+                             || (context.renderComponents && context.continuousRepaint);
+       #else
         const auto isUpdating = isFlagSet (stateToUse, StateFlags::paintComponents);
+       #endif
 
         if (context.renderComponents && isUpdating)
         {
@@ -431,6 +436,11 @@ public:
             {
                 if (isUpdating)
                 {
+                   #if JUCE_QNX
+                    if (context.continuousRepaint)
+                        validArea.clear();
+                   #endif
+
                     paintComponent (currentAreaAndScale);
 
                     if (! isFlagSet (state, StateFlags::initialised))
@@ -1422,15 +1432,9 @@ bool OpenGLContext::makeActive() const noexcept
 {
     auto& current = currentThreadActiveContext;
 
-#if JUCE_QNX
-    logQnxOpenGLContext ("OpenGLContext::makeActive enter");
-#endif
     if (nativeContext != nullptr && nativeContext->makeActive())
     {
         current = const_cast<OpenGLContext*> (this);
-#if JUCE_QNX
-        logQnxOpenGLContext ("OpenGLContext::makeActive success");
-#endif
         return true;
     }
 

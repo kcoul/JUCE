@@ -156,13 +156,8 @@ public:
             return false;
         }
 
-        logQnxOpenGL ("Calling eglMakeCurrent");
-
         if (eglMakeCurrent (display, surface, surface, context) == EGL_TRUE)
-        {
-            logQnxOpenGL ("eglMakeCurrent succeeded");
             return true;
-        }
 
         logQnxOpenGL ("eglMakeCurrent failed, error=0x" + String::toHexString ((int) eglGetError()));
         return false;
@@ -187,7 +182,13 @@ public:
         if (surface != EGL_NO_SURFACE)
         {
             if (eglSwapBuffers (display, surface) != EGL_TRUE)
+            {
                 logQnxOpenGL ("eglSwapBuffers failed, error=0x" + String::toHexString ((int) eglGetError()));
+            }
+            else if (++swapCount <= 5 || (swapCount % 60) == 0)
+            {
+                logQnxOpenGL ("eglSwapBuffers succeeded #" + String (swapCount));
+            }
         }
     }
 
@@ -388,6 +389,7 @@ private:
     EGLNativeWindowType nativeWindow = EGLNativeWindowType{};
     OpenGLVersion versionRequired = OpenGLVersion::defaultGLVersion;
     int swapInterval = 0;
+    int swapCount = 0;
     bool hasInitialised = false;
 
     inline static EGLDisplay sharedDisplay = EGL_NO_DISPLAY;

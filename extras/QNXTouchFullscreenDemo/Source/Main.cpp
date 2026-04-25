@@ -5,6 +5,7 @@
 #include <unistd.h>
 
 #include <atomic>
+#include <cstdlib>
 #include <cmath>
 #include <map>
 #include <set>
@@ -25,7 +26,7 @@ namespace
 
     bool shouldEnableOpenGLRenderer()
     {
-        return juce::SystemStats::getEnvironmentVariable ("JUCE_QNX_ENABLE_OPENGL", {}) == "1";
+        return juce::SystemStats::getEnvironmentVariable ("JUCE_QNX_ENABLE_OPENGL", "1") != "0";
     }
 
     juce::Rectangle<int> getInitialDisplayArea()
@@ -66,6 +67,7 @@ namespace
     public:
         void frameRendered()
         {
+            const juce::ScopedLock lock (stateLock);
             const auto nowMs = juce::Time::getMillisecondCounterHiRes();
 
             if (lastFrameMs > 0.0)
@@ -80,6 +82,8 @@ namespace
 
         juce::String getSummaryText (const juce::String& rendererTag) const
         {
+            const juce::ScopedLock lock (stateLock);
+
             if (frameCount < 2 || averageFrameMs <= 0.0)
                 return rendererTag + " FPS --";
 
@@ -88,6 +92,8 @@ namespace
 
         double getFramesPerSecond() const
         {
+            const juce::ScopedLock lock (stateLock);
+
             if (frameCount < 2 || averageFrameMs <= 0.0)
                 return 0.0;
 
@@ -97,6 +103,7 @@ namespace
     private:
         static constexpr double smoothingFactor = 0.12;
 
+        mutable juce::CriticalSection stateLock;
         double lastFrameMs = 0.0;
         double averageFrameMs = 0.0;
         int frameCount = 0;
@@ -212,13 +219,13 @@ namespace
 }
 
 class MainComponent final : public juce::Component,
-                            private juce::OpenGLRenderer,
-                            private juce::Timer,
                             private juce::OSCReceiver,
                             private juce::OSCReceiver::Listener<juce::OSCReceiver::MessageLoopCallback>
 {
 public:
-    MainComponent()
+    MainComponent (FpsCounter& counterIn, std::atomic<bool>& isOpenGLActiveIn)
+        : fpsCounter (counterIn),
+          isOpenGLActive (isOpenGLActiveIn)
     {
         setWantsKeyboardFocus (true);
         setMouseClickGrabsKeyboardFocus (true);
@@ -250,10 +257,6 @@ public:
                                   + juce::String (getHeight()));
 
         initialiseOscControl();
-        if (shouldEnableOpenGLRenderer())
-            startOpenGLAttachPolling();
-        else
-            juce::Logger::writeToLog ("OpenGL renderer disabled; set JUCE_QNX_ENABLE_OPENGL=1 to test EGL path");
         updateStatusText ("Ready");
         grabKeyboardFocus();
     }
@@ -261,7 +264,6 @@ public:
     ~MainComponent() override
     {
         juce::Logger::writeToLog ("MainComponent shutting down");
-        shutdownOpenGL();
         removeListener (this);
         disconnect();
         synthSource.clearAllVoices();
@@ -430,7 +432,7 @@ public:
                 updateStatusText ("Keyboard reference note off");
             }
 
-            repaint();
+            requestVisualRefresh();
             return true;
         }
 
@@ -439,17 +441,14 @@ public:
 
     void visibilityChanged() override
     {
-        tryAttachOpenGLIfReady();
     }
 
     void parentHierarchyChanged() override
     {
-        tryAttachOpenGLIfReady();
     }
 
     void resized() override
     {
-        tryAttachOpenGLIfReady();
     }
 
 private:
@@ -745,7 +744,7 @@ private:
                                   + " frequency=" + juce::String (frequency, 2)
                                   + " velocity=" + juce::String (velocity, 2));
         updateStatusText ("OSC noteOn " + juce::String (noteNumber));
-        repaint();
+        requestVisualRefresh();
     }
 
     void handleOscNoteOff (const juce::OSCMessage& message)
@@ -769,7 +768,7 @@ private:
             updateStatusText ("OSC noteOff all");
         }
 
-        repaint();
+        requestVisualRefresh();
     }
 
     static int parseOscNoteNumber (const juce::OSCMessage& message)
@@ -802,47 +801,6 @@ private:
             return juce::jlimit (0.0f, 1.0f, (float) argument.getInt32() / 127.0f);
 
         return 1.0f;
-    }
-
-    void initialiseOpenGL()
-    {
-        if (openGLAttachAttempted)
-            return;
-
-        openGLAttachAttempted = true;
-        openGLAttachStartMs = juce::Time::getMillisecondCounterHiRes();
-        openGLContext.setRenderer (this);
-        openGLContext.setComponentPaintingEnabled (true);
-        openGLContext.setContinuousRepainting (true);
-        openGLContext.attachTo (*this);
-        juce::Logger::writeToLog ("Requested OpenGL context attachment");
-    }
-
-    void shutdownOpenGL()
-    {
-        openGLContext.detach();
-        openGLContext.setRenderer (nullptr);
-        isOpenGLActive = false;
-        openGLAttachAttempted = false;
-        openGLRequested = false;
-    }
-
-    void newOpenGLContextCreated() override
-    {
-        isOpenGLActive = true;
-        juce::Logger::writeToLog ("OpenGL context created for touch demo");
-        requestVisualRefresh();
-    }
-
-    void renderOpenGL() override
-    {
-        fpsCounter.frameRendered();
-    }
-
-    void openGLContextClosing() override
-    {
-        isOpenGLActive = false;
-        juce::Logger::writeToLog ("OpenGL context closing for touch demo");
     }
 
     void preferUsbAudioOutput()
@@ -907,29 +865,110 @@ private:
             juce::Logger::writeToLog ("Failed to select USB audio output device '" + usbDeviceName + "': " + setupError);
     }
 
-    void startOpenGLAttachPolling()
+    void requestVisualRefresh()
     {
-        openGLRequested = true;
-        startTimerHz (30);
+        if (auto* content = getContentComponent())
+            content->repaint();
+
+        repaint();
+    }
+
+    juce::AudioDeviceManager deviceManager;
+    juce::AudioSourcePlayer player;
+    TouchSynthAudioSource synthSource;
+    std::map<int, ActivePointer> activePointers;
+    std::set<int> activeOscNotes;
+    juce::String lastError;
+    juce::String statusText;
+    FpsCounter& fpsCounter;
+    std::atomic<bool>& isOpenGLActive;
+    bool audioReady = false;
+    bool keyboardHeld = false;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainComponent)
+};
+
+class MainWindow final : public juce::DocumentWindow,
+                         private juce::OpenGLRenderer,
+                         private juce::Timer
+{
+public:
+    MainWindow()
+        : juce::DocumentWindow ("JUCE QNX Touch Fullscreen Demo",
+                                juce::Colours::black,
+                                juce::DocumentWindow::allButtons,
+                                true)
+    {
+        setUsingNativeTitleBar (false);
+        setResizable (false, false);
+        setTitleBarHeight (0);
+        setContentOwned (new MainComponent (fpsCounter, isOpenGLActive), true);
+        setBounds (getInitialDisplayArea());
+
+        if (shouldEnableOpenGLRenderer())
+        {
+            openGLRequested = true;
+            startTimerHz (30);
+            tryAttachOpenGLIfReady();
+        }
+        else
+        {
+            juce::Logger::writeToLog ("OpenGL renderer disabled; set JUCE_QNX_ENABLE_OPENGL=0 to force software rendering");
+        }
+    }
+
+    ~MainWindow() override
+    {
+        shutdownOpenGL();
+    }
+
+    void closeButtonPressed() override
+    {
+        juce::JUCEApplication::getInstance()->systemRequestedQuit();
+    }
+
+    void resized() override
+    {
+        DocumentWindow::resized();
         tryAttachOpenGLIfReady();
     }
 
-    void tryAttachOpenGLIfReady()
+    void visibilityChanged() override
     {
-        if (! openGLRequested || openGLAttachAttempted || isOpenGLActive.load())
-            return;
+        DocumentWindow::visibilityChanged();
+        tryAttachOpenGLIfReady();
+    }
 
-        if (getPeer() == nullptr || ! isShowing() || getWidth() <= 0 || getHeight() <= 0)
-            return;
+    void parentHierarchyChanged() override
+    {
+        DocumentWindow::parentHierarchyChanged();
+        tryAttachOpenGLIfReady();
+    }
 
-        initialiseOpenGL();
+private:
+    void newOpenGLContextCreated() override
+    {
+        isOpenGLActive = true;
+        juce::Logger::writeToLog ("OpenGL context created for touch demo");
+        requestVisualRefresh();
+    }
+
+    void renderOpenGL() override
+    {
+        fpsCounter.frameRendered();
+    }
+
+    void openGLContextClosing() override
+    {
+        isOpenGLActive = false;
+        juce::Logger::writeToLog ("OpenGL context closing for touch demo");
     }
 
     void timerCallback() override
     {
         if (isOpenGLActive.load())
         {
-            repaint();
+            requestVisualRefresh();
             return;
         }
 
@@ -949,31 +988,43 @@ private:
         }
     }
 
-    void requestVisualRefresh()
+    void tryAttachOpenGLIfReady()
     {
-        if (isOpenGLActive.load())
-            openGLContext.triggerRepaint();
-        else
-            repaint();
+        if (! openGLRequested || openGLAttachAttempted || isOpenGLActive.load())
+            return;
+
+        if (getPeer() == nullptr || ! isShowing() || getWidth() <= 0 || getHeight() <= 0)
+            return;
+
+        openGLAttachAttempted = true;
+        openGLAttachStartMs = juce::Time::getMillisecondCounterHiRes();
+        openGLContext.setRenderer (this);
+        openGLContext.setComponentPaintingEnabled (true);
+        openGLContext.setContinuousRepainting (true);
+        openGLContext.attachTo (*this);
+        juce::Logger::writeToLog ("Requested OpenGL context attachment");
     }
 
-    juce::AudioDeviceManager deviceManager;
-    juce::AudioSourcePlayer player;
-    TouchSynthAudioSource synthSource;
-    std::map<int, ActivePointer> activePointers;
-    std::set<int> activeOscNotes;
-    juce::String lastError;
-    juce::String statusText;
+    void shutdownOpenGL()
+    {
+        openGLContext.detach();
+        openGLContext.setRenderer (nullptr);
+        isOpenGLActive = false;
+        openGLAttachAttempted = false;
+        openGLRequested = false;
+    }
+
+    void requestVisualRefresh()
+    {
+        repaint();
+    }
+
     FpsCounter fpsCounter;
     juce::OpenGLContext openGLContext;
     std::atomic<bool> isOpenGLActive { false };
     bool openGLRequested = false;
     bool openGLAttachAttempted = false;
     double openGLAttachStartMs = 0.0;
-    bool audioReady = false;
-    bool keyboardHeld = false;
-
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainComponent)
 };
 
 class QnxTouchFullscreenApplication final : public juce::JUCEApplication
@@ -985,28 +1036,22 @@ public:
 
     void initialise (const juce::String&) override
     {
+        setenv ("JUCE_QNX_EMBEDDED_FULLSCREEN", "1", 1);
         logger = createAppLogger();
         juce::Logger::setCurrentLogger (logger.get());
         juce::Logger::writeToLog ("Build version: " + juce::String (JUCE_QNX_TOUCH_FULLSCREEN_DEMO_BUILD_VERSION));
         juce::Logger::writeToLog ("Process PID: " + juce::String ((int) getpid()));
         juce::Logger::writeToLog ("Application initialise()");
-        mainComponent = std::make_unique<MainComponent>();
-        mainComponent->setName (getApplicationName());
-        mainComponent->addToDesktop (0);
-        mainComponent->setBounds (getInitialDisplayArea());
-        mainComponent->setVisible (true);
-        mainComponent->toFront (true);
-        mainComponent->grabKeyboardFocus();
-        juce::Logger::writeToLog ("Main component added to desktop");
+        mainWindow = std::make_unique<MainWindow>();
+        mainWindow->setVisible (true);
+        mainWindow->toFront (true);
+        juce::Logger::writeToLog ("Main window added to desktop");
     }
 
     void shutdown() override
     {
         juce::Logger::writeToLog ("Application shutdown()");
-        if (mainComponent != nullptr)
-            mainComponent->removeFromDesktop();
-
-        mainComponent.reset();
+        mainWindow.reset();
         juce::Logger::setCurrentLogger (nullptr);
         logger.reset();
     }
@@ -1020,7 +1065,7 @@ public:
     void anotherInstanceStarted (const juce::String&) override {}
 
 private:
-    std::unique_ptr<MainComponent> mainComponent;
+    std::unique_ptr<MainWindow> mainWindow;
     std::unique_ptr<juce::FileLogger> logger;
 };
 

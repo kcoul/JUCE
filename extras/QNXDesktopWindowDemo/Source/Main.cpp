@@ -3,6 +3,7 @@
 #include <unistd.h>
 
 #include <atomic>
+#include <cstdlib>
 
 #include "GeneratedBuildVersion.h"
 
@@ -13,7 +14,7 @@ namespace
 
     bool shouldEnableOpenGLRenderer()
     {
-        return juce::SystemStats::getEnvironmentVariable ("JUCE_QNX_ENABLE_OPENGL", {}) == "1";
+        return juce::SystemStats::getEnvironmentVariable ("JUCE_QNX_ENABLE_OPENGL", "1") != "0";
     }
 
     class FpsCounter
@@ -21,6 +22,7 @@ namespace
     public:
         void frameRendered()
         {
+            const juce::ScopedLock lock (stateLock);
             const auto nowMs = juce::Time::getMillisecondCounterHiRes();
 
             if (lastFrameMs > 0.0)
@@ -35,6 +37,8 @@ namespace
 
         juce::String getSummaryText (const juce::String& rendererTag) const
         {
+            const juce::ScopedLock lock (stateLock);
+
             if (frameCount < 2 || averageFrameMs <= 0.0)
                 return rendererTag + " FPS --";
 
@@ -43,6 +47,8 @@ namespace
 
         double getFramesPerSecond() const
         {
+            const juce::ScopedLock lock (stateLock);
+
             if (frameCount < 2 || averageFrameMs <= 0.0)
                 return 0.0;
 
@@ -52,6 +58,7 @@ namespace
     private:
         static constexpr double smoothingFactor = 0.12;
 
+        mutable juce::CriticalSection stateLock;
         double lastFrameMs = 0.0;
         double averageFrameMs = 0.0;
         int frameCount = 0;
@@ -84,34 +91,18 @@ namespace
                                                    512 * 1024);
     }
 
-    class DesktopContentComponent final : public juce::Component,
-                                          private juce::OpenGLRenderer,
-                                          private juce::Timer
+    class DesktopContentComponent final : public juce::Component
     {
     public:
-        DesktopContentComponent()
+        DesktopContentComponent (FpsCounter& counterIn, std::atomic<bool>& isOpenGLActiveIn)
+            : fpsCounter (counterIn),
+              isOpenGLActive (isOpenGLActiveIn)
         {
             setOpaque (true);
 
             closeButton.setButtonText ("Close");
             closeButton.onClick = [] { juce::JUCEApplication::getInstance()->systemRequestedQuit(); };
             addAndMakeVisible (closeButton);
-
-            if (shouldEnableOpenGLRenderer())
-            {
-                openGLRequested = true;
-                startTimerHz (30);
-                tryAttachOpenGLIfReady();
-            }
-            else
-            {
-                juce::Logger::writeToLog ("OpenGL renderer disabled; set JUCE_QNX_ENABLE_OPENGL=1 to test EGL path");
-            }
-        }
-
-        ~DesktopContentComponent() override
-        {
-            shutdownOpenGL();
         }
 
         void paint (juce::Graphics& g) override
@@ -133,17 +124,6 @@ namespace
             auto bounds = getLocalBounds().reduced (48, 40);
             auto topRow = bounds.removeFromTop (40);
             closeButton.setBounds (topRow.removeFromRight (110));
-            tryAttachOpenGLIfReady();
-        }
-
-        void visibilityChanged() override
-        {
-            tryAttachOpenGLIfReady();
-        }
-
-        void parentHierarchyChanged() override
-        {
-            tryAttachOpenGLIfReady();
         }
 
     private:
@@ -178,6 +158,70 @@ namespace
                         juce::Justification::centredLeft);
         }
 
+        juce::TextButton closeButton;
+        FpsCounter& fpsCounter;
+        std::atomic<bool>& isOpenGLActive;
+    };
+
+    class MainWindow final : public juce::DocumentWindow,
+                             private juce::OpenGLRenderer,
+                             private juce::Timer
+    {
+    public:
+        MainWindow()
+            : juce::DocumentWindow ("JUCE QNX Desktop Window Demo",
+                                    juce::Colour::fromRGB (26, 39, 51),
+                                    juce::DocumentWindow::closeButton,
+                                    true)
+        {
+            setUsingNativeTitleBar (false);
+            setResizable (true, true);
+            setContentOwned (new DesktopContentComponent (fpsCounter, isOpenGLActive), true);
+
+            auto area = getInitialDisplayArea();
+            setBounds (area.withTrimmedLeft (90).withTrimmedTop (72).withWidth (area.getWidth() - 180).withHeight (area.getHeight() - 144));
+
+            if (shouldEnableOpenGLRenderer())
+            {
+                openGLRequested = true;
+                startTimerHz (30);
+                tryAttachOpenGLIfReady();
+            }
+            else
+            {
+                juce::Logger::writeToLog ("OpenGL renderer disabled; set JUCE_QNX_ENABLE_OPENGL=0 to force software rendering");
+            }
+        }
+
+        ~MainWindow() override
+        {
+            shutdownOpenGL();
+        }
+
+        void closeButtonPressed() override
+        {
+            juce::JUCEApplication::getInstance()->systemRequestedQuit();
+        }
+
+        void resized() override
+        {
+            DocumentWindow::resized();
+            tryAttachOpenGLIfReady();
+        }
+
+        void visibilityChanged() override
+        {
+            DocumentWindow::visibilityChanged();
+            tryAttachOpenGLIfReady();
+        }
+
+        void parentHierarchyChanged() override
+        {
+            DocumentWindow::parentHierarchyChanged();
+            tryAttachOpenGLIfReady();
+        }
+
+    private:
         void newOpenGLContextCreated() override
         {
             isOpenGLActive = true;
@@ -200,7 +244,7 @@ namespace
         {
             if (isOpenGLActive.load())
             {
-                repaint();
+                requestVisualRefresh();
                 return;
             }
 
@@ -248,42 +292,18 @@ namespace
 
         void requestVisualRefresh()
         {
-            if (isOpenGLActive.load())
-                openGLContext.triggerRepaint();
-            else
-                repaint();
+            if (auto* content = getContentComponent())
+                content->repaint();
+
+            repaint();
         }
 
-        juce::TextButton closeButton;
         FpsCounter fpsCounter;
         juce::OpenGLContext openGLContext;
         std::atomic<bool> isOpenGLActive { false };
         bool openGLRequested = false;
         bool openGLAttachAttempted = false;
         double openGLAttachStartMs = 0.0;
-    };
-
-    class MainWindow final : public juce::DocumentWindow
-    {
-    public:
-        MainWindow()
-            : juce::DocumentWindow ("JUCE QNX Desktop Window Demo",
-                                    juce::Colour::fromRGB (26, 39, 51),
-                                    juce::DocumentWindow::closeButton,
-                                    true)
-        {
-            setUsingNativeTitleBar (false);
-            setResizable (true, true);
-            setContentOwned (new DesktopContentComponent(), true);
-
-            auto area = getInitialDisplayArea();
-            setBounds (area.withTrimmedLeft (90).withTrimmedTop (72).withWidth (area.getWidth() - 180).withHeight (area.getHeight() - 144));
-        }
-
-        void closeButtonPressed() override
-        {
-            juce::JUCEApplication::getInstance()->systemRequestedQuit();
-        }
     };
 }
 
@@ -296,6 +316,7 @@ public:
 
     void initialise (const juce::String&) override
     {
+        setenv ("JUCE_QNX_EMBEDDED_FULLSCREEN", "0", 1);
         logger = createAppLogger();
         juce::Logger::setCurrentLogger (logger.get());
         juce::Logger::writeToLog ("Build version: " + juce::String (JUCE_QNX_DESKTOP_WINDOW_DEMO_BUILD_VERSION));
