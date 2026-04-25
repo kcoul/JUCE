@@ -130,7 +130,7 @@ namespace
         juce::Rectangle<int> getFpsOverlayBounds() const
         {
             auto bounds = getLocalBounds().reduced (20);
-            return { bounds.getX() + 12, bounds.getY() + 12, 104, 40 };
+            return { bounds.getX() + 12, bounds.getY() + 12, 156, 40 };
         }
 
         void drawFpsOverlay (juce::Graphics& g) const
@@ -179,7 +179,7 @@ namespace
             setContentOwned (new DesktopContentComponent (fpsCounter, isOpenGLActive), true);
 
             auto area = getInitialDisplayArea();
-            setBounds (area.withTrimmedLeft (90).withTrimmedTop (72).withWidth (area.getWidth() - 180).withHeight (area.getHeight() - 144));
+            setBounds (area);
 
             if (shouldEnableOpenGLRenderer())
             {

@@ -486,13 +486,13 @@ private:
     juce::Rectangle<int> getFpsOverlayBounds() const
     {
         auto bounds = getLocalBounds().reduced (48, 44);
-        return { bounds.getX() + 12, bounds.getY() + 10, 104, 40 };
+        return { bounds.getX() + 12, bounds.getY() + 10, 156, 40 };
     }
 
     juce::Rectangle<int> getTouchCountOverlayBounds() const
     {
         auto bounds = getLocalBounds().reduced (48, 44);
-        return { bounds.getX() + 124, bounds.getY() + 10, 104, 40 };
+        return { bounds.getX() + 176, bounds.getY() + 10, 104, 40 };
     }
 
     void drawDiagnosticCard (juce::Graphics& g,
@@ -867,9 +867,6 @@ private:
 
     void requestVisualRefresh()
     {
-        if (auto* content = getContentComponent())
-            content->repaint();
-
         repaint();
     }
 
@@ -1016,6 +1013,9 @@ private:
 
     void requestVisualRefresh()
     {
+        if (auto* content = getContentComponent())
+            content->repaint();
+
         repaint();
     }
 
