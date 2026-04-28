@@ -69,4 +69,4 @@ CMakeUserPresets.json
 .editorconfig
 
 
-/build-host-juceaide-clean/*
+/build-host-juceaide-*/*
