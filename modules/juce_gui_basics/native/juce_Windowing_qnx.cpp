@@ -347,6 +347,12 @@ namespace
             if (candidate.zOrder != currentBest.zOrder)
                 return candidate.zOrder > currentBest.zOrder;
 
+            const auto candidateModalRank = getModalInputRank (candidate);
+            const auto currentModalRank = getModalInputRank (currentBest);
+
+            if (candidateModalRank != currentModalRank)
+                return candidateModalRank > currentModalRank;
+
             const auto candidateInputRank = getPointerInputRank (candidate);
             const auto currentInputRank = getPointerInputRank (currentBest);
 
@@ -363,6 +369,33 @@ namespace
                 return candidateArea < currentBestArea;
 
             return false;
+        }
+
+        static int getModalInputRank (const PeerState& state) noexcept
+        {
+            auto* peer = state.peer.load();
+
+            if (peer == nullptr)
+                return 0;
+
+            auto& component = peer->getComponent();
+
+            if (component.isCurrentlyModal (false))
+                return 4;
+
+            if (component.isCurrentlyBlockedByAnotherModalComponent())
+                return -4;
+
+            if (auto* modal = Component::getCurrentlyModalComponent())
+            {
+                if (modal == &component || modal->isParentOf (&component))
+                    return 4;
+
+                if (! modal->canModalEventBeSentToComponent (&component))
+                    return -4;
+            }
+
+            return 0;
         }
 
         static int getPointerInputRank (const PeerState& state) noexcept
