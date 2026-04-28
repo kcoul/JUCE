@@ -15,9 +15,42 @@ namespace juce
 
 namespace
 {
+    constexpr const char* qnxOpenGLPresentationProperty = "juce_qnx_use_opengl_presentation";
+
     void logQnxWindowing (const String& message)
     {
         Logger::writeToLog ("[QNX Windowing] " + message);
+    }
+
+    String qnxPeerStyleFlagsToString (int styleFlags)
+    {
+        StringArray flags;
+
+        if ((styleFlags & ComponentPeer::windowAppearsOnTaskbar) != 0)   flags.add ("AppearsOnTaskbar");
+        if ((styleFlags & ComponentPeer::windowIsTemporary) != 0)        flags.add ("Temporary");
+        if ((styleFlags & ComponentPeer::windowIgnoresMouseClicks) != 0) flags.add ("IgnoresMouse");
+        if ((styleFlags & ComponentPeer::windowHasTitleBar) != 0)        flags.add ("HasTitleBar");
+        if ((styleFlags & ComponentPeer::windowIsResizable) != 0)        flags.add ("Resizable");
+        if ((styleFlags & ComponentPeer::windowHasMinimiseButton) != 0)  flags.add ("HasMinimise");
+        if ((styleFlags & ComponentPeer::windowHasMaximiseButton) != 0)  flags.add ("HasMaximise");
+        if ((styleFlags & ComponentPeer::windowHasCloseButton) != 0)     flags.add ("HasClose");
+        if ((styleFlags & ComponentPeer::windowHasDropShadow) != 0)      flags.add ("HasDropShadow");
+        if ((styleFlags & ComponentPeer::windowRepaintedExplicitly) != 0) flags.add ("ExplicitRepaint");
+        if ((styleFlags & ComponentPeer::windowIgnoresKeyPresses) != 0)  flags.add ("IgnoresKeys");
+        if ((styleFlags & ComponentPeer::windowRequiresSynchronousCoreGraphicsRendering) != 0) flags.add ("SyncCoreGraphics");
+        if ((styleFlags & ComponentPeer::windowIsSemiTransparent) != 0)  flags.add ("SemiTransparent");
+
+        return flags.isEmpty() ? "<none>" : flags.joinIntoString ("|");
+    }
+
+    String describeQnxComponentForPeer (Component& component)
+    {
+        String description = "type=" + String (typeid (component).name());
+        description += " name=\"" + component.getName() + "\"";
+        description += " title=\"" + component.getTitle() + "\"";
+        description += " opaque=" + String (component.isOpaque() ? "yes" : "no");
+        description += " onDesktop=" + String (component.isOnDesktop() ? "yes" : "no");
+        return description;
     }
 
     const char* qnxScreenEventTypeToString (int eventType) noexcept
@@ -113,6 +146,12 @@ namespace
     {
         static std::atomic<int> nextZOrder { 100 };
         return nextZOrder.fetch_add (1);
+    }
+
+    uint64 getNextQnxPeerActivationOrder() noexcept
+    {
+        static std::atomic<uint64> nextActivationOrder { 1 };
+        return nextActivationOrder.fetch_add (1);
     }
 
     bool& qnxScreenSaverEnabled()
@@ -212,6 +251,22 @@ namespace
         }
     }
 
+    bool isQnxEmergencyQuitChord (int flags, int modifiers, int sym, int keyCap) noexcept
+    {
+        const bool isKeyDown = (flags & SCREEN_FLAG_KEY_DOWN) != 0;
+        const bool isRepeat = (flags & SCREEN_FLAG_KEY_REPEAT) != 0;
+
+        if (! isKeyDown || isRepeat)
+            return false;
+
+        const auto keyCode = qnxKeySymToJuceKeyCode (sym != 0 ? sym : keyCap);
+        const auto juceModifiers = qnxModifiersFromKeyboard (modifiers);
+
+        return juceModifiers.isCtrlDown()
+            && juceModifiers.isAltDown()
+            && (keyCode == 'Q' || keyCode == 'q' || keyCode == KeyPress::escapeKey);
+    }
+
     struct PeerState
     {
         struct PendingTouchEvent
@@ -226,6 +281,15 @@ namespace
         std::function<void(Point<int>, int, int)> handlePointerEvent;
         std::function<void(Point<int>, int, int)> handleTouchEvent;
         std::function<void(int, int, int, int, int)> handleKeyboardEvent;
+        Rectangle<int> bounds;
+        int zOrder = 0;
+        uint64 activationOrder = 0;
+        bool visible = false;
+        bool temporary = false;
+        bool opaque = false;
+        bool semiTransparent = false;
+        bool ignoresMouseClicks = false;
+        String debugName;
         std::mutex pendingTouchMutex;
         std::vector<PendingTouchEvent> pendingTouchEvents;
         bool touchDispatchPending = false;
@@ -254,6 +318,70 @@ namespace
             const std::scoped_lock lock (mutex);
             registrations.erase (window);
             logQnxWindowing ("Unregistered window from shared event thread");
+        }
+
+        std::shared_ptr<PeerState> findTopmostPeerAt (Point<int> position, std::shared_ptr<PeerState> fallback) const
+        {
+            std::shared_ptr<PeerState> best = fallback;
+
+            for (const auto& entry : registrations)
+            {
+                if (auto candidate = entry.second.lock())
+                {
+                    if (! candidate->alive || ! candidate->visible)
+                        continue;
+
+                    if (! candidate->bounds.contains (position))
+                        continue;
+
+                    if (best == nullptr || isBetterHitTarget (*candidate, *best))
+                        best = std::move (candidate);
+                }
+            }
+
+            return best;
+        }
+
+        static bool isBetterHitTarget (const PeerState& candidate, const PeerState& currentBest) noexcept
+        {
+            if (candidate.zOrder != currentBest.zOrder)
+                return candidate.zOrder > currentBest.zOrder;
+
+            const auto candidateInputRank = getPointerInputRank (candidate);
+            const auto currentInputRank = getPointerInputRank (currentBest);
+
+            if (candidateInputRank != currentInputRank)
+                return candidateInputRank > currentInputRank;
+
+            if (candidate.activationOrder != currentBest.activationOrder)
+                return candidate.activationOrder > currentBest.activationOrder;
+
+            const auto candidateArea = candidate.bounds.getWidth() * candidate.bounds.getHeight();
+            const auto currentBestArea = currentBest.bounds.getWidth() * currentBest.bounds.getHeight();
+
+            if (candidateArea != currentBestArea)
+                return candidateArea < currentBestArea;
+
+            return false;
+        }
+
+        static int getPointerInputRank (const PeerState& state) noexcept
+        {
+            int rank = 0;
+
+            if (! state.ignoresMouseClicks)
+                rank += 8;
+
+            if (state.opaque)
+                rank += 4;
+
+            if (! state.semiTransparent)
+                rank += 2;
+
+            if (state.temporary)
+                rank += 1;
+
+            return rank;
         }
 
         void run() override
@@ -304,6 +432,53 @@ namespace
                         if (auto only = registrations.begin()->second.lock())
                             state = only;
                     }
+
+                    if (eventType == SCREEN_EVENT_POINTER
+                        || eventType == SCREEN_EVENT_MTOUCH_TOUCH
+                        || eventType == SCREEN_EVENT_MTOUCH_MOVE
+                        || eventType == SCREEN_EVENT_MTOUCH_RELEASE)
+                    {
+                        int position[2] { 0, 0 };
+                        screen_get_event_property_iv (event, SCREEN_PROPERTY_POSITION, position);
+                        auto hitState = findTopmostPeerAt ({ position[0], position[1] }, state);
+
+                        if (eventType == SCREEN_EVENT_POINTER)
+                        {
+                            int buttons = 0;
+                            screen_get_event_property_iv (event, SCREEN_PROPERTY_BUTTONS, &buttons);
+
+                            if (buttons != 0)
+                            {
+                                if (lastPointerButtons == 0)
+                                    pointerCaptureState = hitState;
+                                else if (auto captured = pointerCaptureState.lock())
+                                    hitState = captured;
+                            }
+                            else if (lastPointerButtons != 0)
+                            {
+                                if (auto captured = pointerCaptureState.lock())
+                                    hitState = captured;
+
+                                pointerCaptureState.reset();
+                            }
+                            else
+                            {
+                                pointerCaptureState.reset();
+                            }
+
+                            lastPointerButtons = buttons;
+                        }
+
+                        if (hitState != state)
+                        {
+                            logQnxWindowing ("Retargeted input event to peer "
+                                             + (hitState != nullptr ? hitState->debugName : String ("<null>"))
+                                             + " at "
+                                             + String (position[0]) + "," + String (position[1]));
+                        }
+
+                        state = std::move (hitState);
+                    }
                 }
 
                 ++receivedEventCount;
@@ -347,6 +522,29 @@ namespace
                                      + (userData.isNotEmpty() ? userData : "<empty>")
                                      + " targetRegistered="
                                      + String (state != nullptr ? "yes" : "no"));
+                }
+
+                if (eventType == SCREEN_EVENT_KEYBOARD)
+                {
+                    int flags = 0;
+                    int modifiers = 0;
+                    int sym = 0;
+                    int keyCap = 0;
+                    screen_get_event_property_iv (event, SCREEN_PROPERTY_FLAGS, &flags);
+                    screen_get_event_property_iv (event, SCREEN_PROPERTY_MODIFIERS, &modifiers);
+                    screen_get_event_property_iv (event, SCREEN_PROPERTY_SYM, &sym);
+                    screen_get_event_property_iv (event, SCREEN_PROPERTY_KEY_CAP, &keyCap);
+
+                    if (isQnxEmergencyQuitChord (flags, modifiers, sym, keyCap))
+                    {
+                        logQnxWindowing ("Emergency quit chord received in shared event thread");
+
+                        MessageManager::callAsync ([]()
+                        {
+                            if (auto* app = JUCEApplicationBase::getInstance())
+                                app->systemRequestedQuit();
+                        });
+                    }
                 }
 
                 if (state == nullptr || ! state->alive)
@@ -506,6 +704,8 @@ namespace
         screen_context_t context = nullptr;
         std::mutex mutex;
         std::map<screen_window_t, std::weak_ptr<PeerState>> registrations;
+        std::weak_ptr<PeerState> pointerCaptureState;
+        int lastPointerButtons = 0;
         int receivedEventCount = 0;
         int getEventErrorCount = 0;
     };
@@ -649,8 +849,23 @@ namespace
               attachedExternally (nativeWindowToAttachTo)
         {
             logQnxWindowing ("QnxComponentPeer ctor, attachedExternally=" + String (nativeWindow != nullptr ? "yes" : "no"));
+            logQnxWindowing ("QnxComponentPeer component " + describeQnxComponentForPeer (component));
+            logQnxWindowing ("QnxComponentPeer styleFlags=" + String (windowStyleFlags)
+                             + " [" + qnxPeerStyleFlagsToString (windowStyleFlags) + "]");
+
             getNativeRealtimeModifiers = []() { return ModifierKeys::currentModifiers; };
             peerState->peer = this;
+            peerState->bounds = bounds;
+            peerState->visible = false;
+            peerState->zOrder = nativeZOrder;
+            peerState->activationOrder = getNextQnxPeerActivationOrder();
+            peerState->temporary = isTemporaryPeer();
+            peerState->opaque = component.isOpaque();
+            peerState->semiTransparent = (windowStyleFlags & ComponentPeer::windowIsSemiTransparent) != 0;
+            peerState->ignoresMouseClicks = (windowStyleFlags & ComponentPeer::windowIgnoresMouseClicks) != 0;
+            peerState->debugName = component.getName().isNotEmpty() ? component.getName()
+                                 : component.getTitle().isNotEmpty() ? component.getTitle()
+                                 : String (typeid (component).name());
             peerState->handlePointerEvent = [this] (Point<int> position, int buttons, int wheelTicks)
             {
                 handlePointerEvent (position, buttons, wheelTicks);
@@ -681,8 +896,9 @@ namespace
             usingSharedContext = true;
 
             const auto embeddedFullscreen = shouldUseEmbeddedFullscreenQnxWindow();
-            const auto windowType = embeddedFullscreen ? (SCREEN_APPLICATION_WINDOW | SCREEN_ROOT_WINDOW)
-                                                       : SCREEN_APPLICATION_WINDOW;
+            const auto windowType = isTemporaryPeer() ? SCREEN_CHILD_WINDOW
+                                   : embeddedFullscreen ? (SCREEN_APPLICATION_WINDOW | SCREEN_ROOT_WINDOW)
+                                                        : SCREEN_APPLICATION_WINDOW;
 
             if (screen_create_window_type (&nativeWindow, screenContext, windowType) != 0)
             {
@@ -694,8 +910,9 @@ namespace
             }
 
             logQnxWindowing ("screen_create_window_type succeeded type="
-                             + String (embeddedFullscreen ? "SCREEN_APPLICATION_WINDOW|SCREEN_ROOT_WINDOW"
-                                                          : "SCREEN_APPLICATION_WINDOW"));
+                             + String (isTemporaryPeer() ? "SCREEN_CHILD_WINDOW"
+                                                         : embeddedFullscreen ? "SCREEN_APPLICATION_WINDOW|SCREEN_ROOT_WINDOW"
+                                                                              : "SCREEN_APPLICATION_WINDOW"));
 
             const int usage = SCREEN_USAGE_NATIVE | SCREEN_USAGE_READ | SCREEN_USAGE_WRITE
                             | SCREEN_USAGE_OPENGL_ES2 | SCREEN_USAGE_OPENGL_ES3;
@@ -720,6 +937,7 @@ namespace
                 logQnxWindowing ("screen_set_window_property_cv(SCREEN_PROPERTY_ID_STRING) failed, errno=" + String (errno));
             }
 
+            joinedActiveWindowGroup = isTemporaryPeer() && joinActiveWindowGroup();
             attachWindowToPrimaryDisplay();
 
             if (embeddedFullscreen)
@@ -729,8 +947,17 @@ namespace
             }
             else
             {
-                logQnxWindowing ("Managed window mode active; using Screen application window");
-                ensureWindowGroupCreated();
+                if (! joinedActiveWindowGroup && ! isTemporaryPeer())
+                {
+                    logQnxWindowing ("Managed window mode active; using Screen application window");
+                    ensureWindowGroupCreated();
+                }
+
+                if (joinedActiveWindowGroup)
+                    logQnxWindowing ("Joined active Screen window group");
+                else if (isTemporaryPeer())
+                    logQnxWindowing ("Transient window mode active without active group; leaving window ungrouped");
+
                 requestWindowGroupFocus();
             }
 
@@ -774,6 +1001,18 @@ namespace
         void setVisible (bool shouldBeVisible) override
         {
             isVisible = shouldBeVisible;
+
+            if (shouldBeVisible)
+            {
+                nativeZOrder = getNextQnxWindowZOrder();
+                peerState->activationOrder = getNextQnxPeerActivationOrder();
+
+                requestWindowGroupFocus();
+
+                if (joinedActiveWindowGroup)
+                    grabFocus();
+            }
+
             logQnxWindowing ("setVisible(" + String (shouldBeVisible ? "true" : "false") + ")");
             updateWindowState();
 
@@ -821,6 +1060,7 @@ namespace
         void toFront (bool takeKeyboardFocus) override
         {
             nativeZOrder = getNextQnxWindowZOrder();
+            peerState->activationOrder = getNextQnxPeerActivationOrder();
             updateWindowState();
             handleBroughtToFront();
 
@@ -896,7 +1136,74 @@ namespace
 
     private:
         bool ownsWindow() const noexcept                                  { return attachedExternally == nullptr; }
-        bool shouldUseSoftwarePresentation() const noexcept               { return ! isExperimentalQnxOpenGLEnabled(); }
+        bool shouldUseSoftwarePresentation() const noexcept
+        {
+            return ! shouldUseOpenGLPresentation();
+        }
+
+        bool isTemporaryPeer() const noexcept
+        {
+            return (getStyleFlags() & ComponentPeer::windowIsTemporary) != 0;
+        }
+
+        bool shouldUseOpenGLPresentation() const noexcept
+        {
+            if (! isExperimentalQnxOpenGLEnabled())
+                return false;
+
+            if (component.getProperties().contains (qnxOpenGLPresentationProperty))
+                return static_cast<bool> (component.getProperties()[qnxOpenGLPresentationProperty]);
+
+            return false;
+        }
+
+        bool joinActiveWindowGroup()
+        {
+            if (! isTemporaryPeer())
+                return false;
+
+            auto* activeWindow = TopLevelWindow::getActiveTopLevelWindow();
+
+            if (activeWindow == nullptr || activeWindow == &component)
+                return false;
+
+            auto* activePeer = activeWindow->getPeer();
+
+            if (activePeer == nullptr)
+                return false;
+
+            auto* activeNativeWindow = reinterpret_cast<screen_window_t> (activePeer->getNativeHandle());
+
+            if (activeNativeWindow == nullptr || activeNativeWindow == nativeWindow)
+                return false;
+
+            const auto groupName = getWindowPropertyString (activeNativeWindow, SCREEN_PROPERTY_GROUP, 64);
+
+            if (groupName.isEmpty())
+            {
+                logQnxWindowing ("Active peer has no Screen group to join");
+                return false;
+            }
+
+            if (screen_join_window_group (nativeWindow, groupName.toRawUTF8()) != 0)
+            {
+                logQnxWindowing ("screen_join_window_group failed for group=" + groupName + " errno=" + String (errno));
+                return false;
+            }
+
+            screen_group_t group = nullptr;
+
+            if (screen_get_window_property_pv (nativeWindow, SCREEN_PROPERTY_GROUP, reinterpret_cast<void**> (&group)) != 0
+                || group == nullptr)
+            {
+                logQnxWindowing ("Joined active Screen group by name but failed to query group handle");
+                return false;
+            }
+
+            windowGroup = group;
+            logQnxWindowing ("Joined active Screen group name=" + groupName);
+            return true;
+        }
 
         void attachWindowToPrimaryDisplay()
         {
@@ -922,14 +1229,31 @@ namespace
             flushScreenContext ("attachWindowToPrimaryDisplay");
 
             int windowManagerId = SCREEN_INVALID_ID;
-            int displaySize[2] { 0, 0 };
             screen_get_display_property_iv (display, SCREEN_PROPERTY_WINDOW_MANAGER_ID, &windowManagerId);
-            screen_get_display_property_iv (display, SCREEN_PROPERTY_SIZE, displaySize);
-            primaryDisplayBounds = { 0, 0, jmax (1, displaySize[0]), jmax (1, displaySize[1]) };
+            updatePrimaryDisplayBoundsFromDisplay (display);
 
             logQnxWindowing ("Attached window to primary display size="
-                             + String (displaySize[0]) + "x" + String (displaySize[1])
+                             + String (primaryDisplayBounds.getWidth()) + "x" + String (primaryDisplayBounds.getHeight())
                              + " windowManagerId=" + String (windowManagerId));
+        }
+
+        void updatePrimaryDisplayBoundsFromContext()
+        {
+            if (screenContext == nullptr)
+                return;
+
+            if (auto* display = getPrimaryQnxScreenDisplay (screenContext))
+                updatePrimaryDisplayBoundsFromDisplay (display);
+        }
+
+        void updatePrimaryDisplayBoundsFromDisplay (screen_display_t display)
+        {
+            if (display == nullptr)
+                return;
+
+            int displaySize[2] { 0, 0 };
+            screen_get_display_property_iv (display, SCREEN_PROPERTY_SIZE, displaySize);
+            primaryDisplayBounds = { 0, 0, jmax (1, displaySize[0]), jmax (1, displaySize[1]) };
         }
 
         void ensureWindowGroupCreated()
@@ -1225,7 +1549,11 @@ namespace
         {
             auto localPos = globalToLocal (eventPosition.toFloat());
 
-            if (! primaryDisplayBounds.isEmpty()
+            if (! joinedActiveWindowGroup
+                && ! isTemporaryPeer()
+                && primaryDisplayBounds.getWidth() > 1
+                && primaryDisplayBounds.getHeight() > 1
+                && ! primaryDisplayBounds.isEmpty()
                 && (primaryDisplayBounds.getWidth() != bounds.getWidth()
                     || primaryDisplayBounds.getHeight() != bounds.getHeight()))
             {
@@ -1264,6 +1592,18 @@ namespace
 
             const int keyCode = qnxKeySymToJuceKeyCode (sym != 0 ? sym : keyCap);
             const juce_wchar textCharacter = (keyCap >= 0x20 && keyCap != KEYCODE_DELETE) ? (juce_wchar) keyCap : 0;
+            if (isQnxEmergencyQuitChord (flags, modifiers, sym, keyCap))
+            {
+                logQnxWindowing ("Emergency quit chord received in peer");
+
+                MessageManager::callAsync ([]()
+                {
+                    if (auto* app = JUCEApplicationBase::getInstance())
+                        app->systemRequestedQuit();
+                });
+
+                return;
+            }
 
             if (isKeyDown)
             {
@@ -1560,6 +1900,10 @@ namespace
             const int visible = isVisible ? 1 : 0;
             const int zOrder = isAlwaysOnTop ? jmax (nativeZOrder, 10000) : nativeZOrder;
 
+            peerState->bounds = bounds;
+            peerState->visible = isVisible;
+            peerState->zOrder = zOrder;
+
             screen_set_window_property_iv (nativeWindow, SCREEN_PROPERTY_POSITION, position);
             screen_set_window_property_iv (nativeWindow, SCREEN_PROPERTY_SIZE, size);
             screen_set_window_property_iv (nativeWindow, SCREEN_PROPERTY_VISIBLE, &visible);
@@ -1711,6 +2055,7 @@ namespace
         screen_session_t mtouchSession = nullptr;
         screen_session_t keyboardSession = nullptr;
         void* attachedExternally = nullptr;
+        bool joinedActiveWindowGroup = false;
         String managerString;
         bool hasRequestedWindowManagement = false;
         int lastLoggedStatus = -1;

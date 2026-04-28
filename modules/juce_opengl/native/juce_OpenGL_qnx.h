@@ -53,10 +53,23 @@ public:
     {
         auto* peer = component.getPeer();
 
+        logQnxOpenGL ("NativeContext ctor for component type="
+                      + String (typeid (component).name())
+                      + " peer="
+                      + String::toHexString ((pointer_sized_int) peer));
+
         if (peer == nullptr)
+        {
+            logQnxOpenGL ("NativeContext ctor aborted because peer is null");
             return;
+        }
 
         nativeWindow = reinterpret_cast<EGLNativeWindowType> (peer->getNativeHandle());
+
+        logQnxOpenGL ("NativeContext using native window="
+                      + String::toHexString ((pointer_sized_int) nativeWindow)
+                      + " styleFlags="
+                      + String (peer->getStyleFlags()));
 
         if (nativeWindow == EGLNativeWindowType{})
         {
@@ -100,12 +113,20 @@ public:
         const ScopedLock lock (mutex);
 
         if (! hasInitialised)
+        {
+            logQnxOpenGL ("initialiseOnRenderThread aborted because context was not initialised");
             return InitResult::fatal;
+        }
 
         if (surface != EGL_NO_SURFACE)
+        {
+            logQnxOpenGL ("initialiseOnRenderThread reusing existing surface/context");
             return InitResult::success;
+        }
 
         auto surfaceAttributes = std::array<EGLint, 1> { EGL_NONE };
+        logQnxOpenGL ("Calling eglCreateWindowSurface for window="
+                      + String::toHexString ((pointer_sized_int) nativeWindow));
         surface = eglCreateWindowSurface (display, config, nativeWindow, surfaceAttributes.data());
 
         if (surface == EGL_NO_SURFACE)
@@ -123,6 +144,10 @@ public:
             EGL_NONE
         };
 
+        logQnxOpenGL ("Calling eglCreateContext for window="
+                      + String::toHexString ((pointer_sized_int) nativeWindow)
+                      + " sharedContext="
+                      + String::toHexString ((pointer_sized_int) contextToShareWith));
         context = eglCreateContext (display, config, contextToShareWith, contextAttributes.data());
 
         if (context == EGL_NO_CONTEXT)
@@ -140,6 +165,8 @@ public:
     void shutdownOnRenderThread()
     {
         const ScopedLock lock (mutex);
+        logQnxOpenGL ("shutdownOnRenderThread for window="
+                      + String::toHexString ((pointer_sized_int) nativeWindow));
         juceContext = nullptr;
         deactivateCurrentContext();
         destroyContext();
@@ -362,6 +389,8 @@ private:
     {
         if (surface != EGL_NO_SURFACE)
         {
+            logQnxOpenGL ("Destroying EGL surface for window="
+                          + String::toHexString ((pointer_sized_int) nativeWindow));
             eglDestroySurface (display, surface);
             surface = EGL_NO_SURFACE;
         }
@@ -371,6 +400,8 @@ private:
     {
         if (context != EGL_NO_CONTEXT)
         {
+            logQnxOpenGL ("Destroying EGL context for window="
+                          + String::toHexString ((pointer_sized_int) nativeWindow));
             eglDestroyContext (display, context);
             context = EGL_NO_CONTEXT;
         }
