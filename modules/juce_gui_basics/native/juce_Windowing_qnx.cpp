@@ -278,6 +278,7 @@ namespace
 
         std::atomic<class QnxComponentPeer*> peer { nullptr };
         std::atomic<bool> alive { true };
+        Component* component = nullptr;
         std::function<void(Point<int>, int, int)> handlePointerEvent;
         std::function<void(Point<int>, int, int)> handleTouchEvent;
         std::function<void(int, int, int, int, int)> handleKeyboardEvent;
@@ -373,25 +374,23 @@ namespace
 
         static int getModalInputRank (const PeerState& state) noexcept
         {
-            auto* peer = state.peer.load();
+            auto* component = state.component;
 
-            if (peer == nullptr)
+            if (component == nullptr)
                 return 0;
 
-            auto& component = peer->getComponent();
-
-            if (component.isCurrentlyModal (false))
+            if (component->isCurrentlyModal (false))
                 return 4;
 
-            if (component.isCurrentlyBlockedByAnotherModalComponent())
+            if (component->isCurrentlyBlockedByAnotherModalComponent())
                 return -4;
 
             if (auto* modal = Component::getCurrentlyModalComponent())
             {
-                if (modal == &component || modal->isParentOf (&component))
+                if (modal == component || modal->isParentOf (component))
                     return 4;
 
-                if (! modal->canModalEventBeSentToComponent (&component))
+                if (! modal->canModalEventBeSentToComponent (component))
                     return -4;
             }
 
@@ -888,6 +887,7 @@ namespace
 
             getNativeRealtimeModifiers = []() { return ModifierKeys::currentModifiers; };
             peerState->peer = this;
+            peerState->component = &component;
             peerState->bounds = bounds;
             peerState->visible = false;
             peerState->zOrder = nativeZOrder;
@@ -929,7 +929,8 @@ namespace
             usingSharedContext = true;
 
             const auto embeddedFullscreen = shouldUseEmbeddedFullscreenQnxWindow();
-            const auto windowType = isTemporaryPeer() ? SCREEN_CHILD_WINDOW
+            const auto groupedChildWindow = shouldUseGroupedChildWindow();
+            const auto windowType = groupedChildWindow ? SCREEN_CHILD_WINDOW
                                    : embeddedFullscreen ? (SCREEN_APPLICATION_WINDOW | SCREEN_ROOT_WINDOW)
                                                         : SCREEN_APPLICATION_WINDOW;
 
@@ -943,7 +944,7 @@ namespace
             }
 
             logQnxWindowing ("screen_create_window_type succeeded type="
-                             + String (isTemporaryPeer() ? "SCREEN_CHILD_WINDOW"
+                             + String (groupedChildWindow ? "SCREEN_CHILD_WINDOW"
                                                          : embeddedFullscreen ? "SCREEN_APPLICATION_WINDOW|SCREEN_ROOT_WINDOW"
                                                                               : "SCREEN_APPLICATION_WINDOW"));
 
@@ -970,7 +971,7 @@ namespace
                 logQnxWindowing ("screen_set_window_property_cv(SCREEN_PROPERTY_ID_STRING) failed, errno=" + String (errno));
             }
 
-            joinedActiveWindowGroup = isTemporaryPeer() && joinActiveWindowGroup();
+            joinedActiveWindowGroup = groupedChildWindow && joinActiveWindowGroup();
             attachWindowToPrimaryDisplay();
 
             if (embeddedFullscreen)
@@ -980,7 +981,7 @@ namespace
             }
             else
             {
-                if (! joinedActiveWindowGroup && ! isTemporaryPeer())
+                if (! joinedActiveWindowGroup && ! groupedChildWindow)
                 {
                     logQnxWindowing ("Managed window mode active; using Screen application window");
                     ensureWindowGroupCreated();
@@ -988,10 +989,13 @@ namespace
 
                 if (joinedActiveWindowGroup)
                     logQnxWindowing ("Joined active Screen window group");
-                else if (isTemporaryPeer())
-                    logQnxWindowing ("Transient window mode active without active group; leaving window ungrouped");
+                else if (groupedChildWindow)
+                    logQnxWindowing ("Grouped child window active without active group; leaving window ungrouped");
 
-                requestWindowGroupFocus();
+                if (joinedActiveWindowGroup || groupedChildWindow)
+                    requestWindowGroupFocus();
+                else
+                    logQnxWindowing ("Skipping Screen group-focus request for managed secondary window");
             }
 
             updateWindowState();
@@ -1005,6 +1009,7 @@ namespace
             currentTouches.deleteAllTouchesForPeer (this);
             activeTouchContacts.clear();
             peerState->peer = nullptr;
+            peerState->component = nullptr;
             peerState->alive = false;
             peerState->handlePointerEvent = {};
             peerState->handleTouchEvent = {};
@@ -1040,7 +1045,8 @@ namespace
                 nativeZOrder = getNextQnxWindowZOrder();
                 peerState->activationOrder = getNextQnxPeerActivationOrder();
 
-                requestWindowGroupFocus();
+                if (joinedActiveWindowGroup || shouldUseGroupedChildWindow())
+                    requestWindowGroupFocus();
 
                 if (joinedActiveWindowGroup)
                     grabFocus();
@@ -1179,6 +1185,21 @@ namespace
             return (getStyleFlags() & ComponentPeer::windowIsTemporary) != 0;
         }
 
+        bool shouldUseGroupedChildWindow() const noexcept
+        {
+            if (isTemporaryPeer())
+                return true;
+
+            if (shouldUseEmbeddedFullscreenQnxWindow())
+                return false;
+
+            if (dynamic_cast<DocumentWindow*> (&component) == nullptr)
+                return false;
+
+            auto* activeWindow = TopLevelWindow::getActiveTopLevelWindow();
+            return activeWindow != nullptr && activeWindow != &component;
+        }
+
         bool shouldUseOpenGLPresentation() const noexcept
         {
             if (! isExperimentalQnxOpenGLEnabled())
@@ -1192,7 +1213,7 @@ namespace
 
         bool joinActiveWindowGroup()
         {
-            if (! isTemporaryPeer())
+            if (! shouldUseGroupedChildWindow())
                 return false;
 
             auto* activeWindow = TopLevelWindow::getActiveTopLevelWindow();
