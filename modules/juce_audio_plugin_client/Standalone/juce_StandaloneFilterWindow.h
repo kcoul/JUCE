@@ -305,7 +305,11 @@ public:
         content->setSize (500, 550);
         content->setToRecommendedSize();
 
-        o.content.setOwned (content.release());
+        auto contentViewport = std::make_unique<SettingsViewport> (std::move (content),
+                                                                    getMaximumSettingsDialogContentHeight());
+        contentViewport->setSize (500, contentViewport->getRecommendedHeight());
+
+        o.content.setOwned (contentViewport.release());
 
         o.dialogTitle                   = TRANS ("Audio/MIDI Settings");
         o.dialogBackgroundColour        = o.content->getLookAndFeel().findColour (ResizableWindow::backgroundColourId);
@@ -318,6 +322,14 @@ public:
         o.resizable                     = false;
 
         o.launchAsync();
+    }
+
+    static int getMaximumSettingsDialogContentHeight()
+    {
+        if (auto* display = Desktop::getInstance().getDisplays().getPrimaryDisplay())
+            return jmax (200, display->userBounds.toNearestInt().getHeight() - 80);
+
+        return 550;
     }
 
     void saveAudioDeviceState()
@@ -554,6 +566,83 @@ private:
 
         //==============================================================================
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SettingsComponent)
+    };
+
+    class SettingsViewport final : public Component,
+                                   private ComponentListener
+    {
+    public:
+        SettingsViewport (std::unique_ptr<SettingsComponent> contentToUse,
+                          int maxContentHeightToUse)
+            : content (contentToUse.get()),
+              maxContentHeight (maxContentHeightToUse)
+        {
+            jassert (content != nullptr);
+
+            setOpaque (true);
+            viewport.setScrollBarsShown (true, false);
+            addAndMakeVisible (viewport);
+
+            content->addComponentListener (this);
+            viewport.setViewedComponent (contentToUse.release(), true);
+        }
+
+        ~SettingsViewport() override
+        {
+            if (content != nullptr)
+                content->removeComponentListener (this);
+        }
+
+        int getRecommendedHeight() const
+        {
+            return content != nullptr ? jmin (content->getHeight(), maxContentHeight) : maxContentHeight;
+        }
+
+        void paint (Graphics& g) override
+        {
+            g.fillAll (getLookAndFeel().findColour (ResizableWindow::backgroundColourId));
+        }
+
+        void resized() override
+        {
+            viewport.setBounds (getLocalBounds());
+            updateContentWidth();
+        }
+
+    private:
+        void componentBeingDeleted (Component& component) override
+        {
+            if (&component == content)
+                content = nullptr;
+        }
+
+        void componentMovedOrResized (Component& component, bool, bool wasResized) override
+        {
+            if (&component == content && wasResized && ! isUpdatingContent)
+                setSize (getWidth(), getRecommendedHeight());
+        }
+
+        void updateContentWidth()
+        {
+            if (content == nullptr)
+                return;
+
+            const ScopedValueSetter<bool> scope (isUpdatingContent, true);
+            const auto visibleWidth = jmax (1, viewport.getMaximumVisibleWidth());
+
+            if (content->getWidth() != visibleWidth)
+            {
+                content->setSize (visibleWidth, content->getHeight());
+                content->setToRecommendedSize();
+            }
+        }
+
+        SettingsComponent* content = nullptr;
+        Viewport viewport;
+        int maxContentHeight;
+        bool isUpdatingContent = false;
+
+        JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SettingsViewport)
     };
 
     //==============================================================================
