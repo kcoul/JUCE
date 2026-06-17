@@ -172,6 +172,24 @@ namespace
         return enabled;
     }
 
+    // Prototype fast software-present path: honour the accumulated dirty region
+    // (render + blit + post only what changed) and reuse a persistent backing
+    // image instead of malloc+memset-ing a full-window ARGB image every frame.
+    // Off by default so the original path stays the A/B baseline.
+    bool shouldUseFastQnxPresent()
+    {
+        static const bool enabled = SystemStats::getEnvironmentVariable ("JUCE_QNX_FAST_PRESENT", "0") == "1";
+        return enabled;
+    }
+
+    // Emit a once-per-second "QNX_PRESENT_FPS ..." line from the present path so
+    // any JUCE app (incl. SurgeXT) reports achieved present rate with no app code.
+    bool shouldLogQnxPresentFps()
+    {
+        static const bool enabled = SystemStats::getEnvironmentVariable ("JUCE_QNX_LOG_FPS", "0") == "1";
+        return enabled;
+    }
+
     ModifierKeys qnxModifiersFromButtons (int buttons)
     {
         auto mods = ModifierKeys::getCurrentModifiersRealtime().withoutMouseButtons();
@@ -1150,22 +1168,65 @@ namespace
 
             const ScopedValueSetter<bool> repaintSetter (isPerformingRepaint, true);
 
-            auto imageBounds = bounds.withZeroOrigin();
+            const auto fullBounds = bounds.withZeroOrigin();
 
-            if (imageBounds.isEmpty() || ! ensureWindowReady())
+            if (fullBounds.isEmpty() || ! ensureWindowReady())
             {
-                logQnxWindowing ("Skipping repaint, imageBounds=" + imageBounds.toString());
+                logQnxWindowing ("Skipping repaint, imageBounds=" + fullBounds.toString());
                 return;
             }
 
+            if (shouldUseFastQnxPresent())
+            {
+                performFastRepaint (fullBounds);
+                return;
+            }
+
+            // --- Original baseline path: full-window re-render every frame. ---
             Image temp (Image::ARGB,
-                        imageBounds.getWidth(),
-                        imageBounds.getHeight(),
+                        fullBounds.getWidth(),
+                        fullBounds.getHeight(),
                         true);
 
             LowLevelGraphicsSoftwareRenderer renderer (temp);
             handlePaint (renderer);
-            present (temp, imageBounds);
+            present (temp, fullBounds);
+            pendingRepaintArea = {};
+        }
+
+        // Dirty-region-aware software repaint (prototype, JUCE_QNX_FAST_PRESENT=1).
+        void performFastRepaint (Rectangle<int> fullBounds)
+        {
+            auto dirty = pendingRepaintArea.getIntersection (fullBounds);
+
+            if (dirty.isEmpty())
+            {
+                pendingRepaintArea = {};
+                return;
+            }
+
+            // Reuse the backing image across frames; only (re)allocate on resize.
+            if (! backingImage.isValid()
+                || backingImage.getWidth()  != fullBounds.getWidth()
+                || backingImage.getHeight() != fullBounds.getHeight())
+            {
+                backingImage = Image (Image::ARGB, fullBounds.getWidth(), fullBounds.getHeight(), true);
+                dirty = fullBounds; // fresh buffer: everything is dirty once
+            }
+
+            // Clear just the dirty region (cheap), then paint the component clipped to it.
+            {
+                Image::BitmapData bd (backingImage, dirty.getX(), dirty.getY(),
+                                      dirty.getWidth(), dirty.getHeight(),
+                                      Image::BitmapData::writeOnly);
+
+                for (int y = 0; y < dirty.getHeight(); ++y)
+                    std::memset (bd.getLinePointer (y), 0, (size_t) dirty.getWidth() * 4u);
+            }
+
+            LowLevelGraphicsSoftwareRenderer renderer (backingImage, Point<int>(), RectangleList<int> (dirty));
+            handlePaint (renderer);
+            presentRegion (backingImage, dirty);
             pendingRepaintArea = {};
         }
 
@@ -2083,6 +2144,7 @@ namespace
             const auto postResult = screen_post_window (nativeWindow, buffer, 1, dirtyRect, 0);
 
             ++presentCount;
+            notePresentForFps();
 
             if (postResult != 0)
             {
@@ -2096,9 +2158,97 @@ namespace
                                  + " stride=" + String (stride));
         }
 
+        // Blit + post only the dirty sub-rectangle (prototype fast path). The single
+        // native Screen buffer persists between posts, so prior content is retained
+        // and partial updates accumulate correctly.
+        void presentRegion (const Image& image, Rectangle<int> dirty)
+        {
+            screen_buffer_t buffer = nullptr;
+
+            if (screen_dequeue_window_render_buffer (&buffer, nativeWindow, 0) != 0 || buffer == nullptr)
+            {
+                logQnxWindowing ("screen_dequeue_window_render_buffer failed (region)");
+                return;
+            }
+
+            void* pointer = nullptr;
+            int stride = 0;
+
+            if (screen_get_buffer_property_pv (buffer, SCREEN_PROPERTY_POINTER, &pointer) != 0
+                || screen_get_buffer_property_iv (buffer, SCREEN_PROPERTY_STRIDE, &stride) != 0
+                || pointer == nullptr
+                || stride <= 0)
+            {
+                logQnxWindowing ("Failed to query Screen buffer pointer/stride (region)");
+                return;
+            }
+
+            const Image::BitmapData bitmapData (image, Image::BitmapData::readOnly);
+            constexpr int bytesPerPixel = 4;
+
+            for (int row = 0; row < dirty.getHeight(); ++row)
+            {
+                const int y = dirty.getY() + row;
+                auto* srcLine = bitmapData.getLinePointer (y) + (ptrdiff_t) dirty.getX() * bytesPerPixel;
+                auto* dstLine = static_cast<uint8*> (pointer)
+                              + (ptrdiff_t) y * (ptrdiff_t) stride
+                              + (ptrdiff_t) dirty.getX() * bytesPerPixel;
+                std::memcpy (dstLine, srcLine, (size_t) dirty.getWidth() * bytesPerPixel);
+            }
+
+            // Screen dirty rects are [x1, y1, x2, y2].
+            const int dirtyRect[4] = { dirty.getX(), dirty.getY(), dirty.getRight(), dirty.getBottom() };
+            const auto postResult = screen_post_window (nativeWindow, buffer, 1, dirtyRect, 0);
+
+            ++presentCount;
+            notePresentForFps();
+
+            if (postResult != 0)
+            {
+                logQnxWindowing ("screen_post_window failed (region)");
+                return;
+            }
+
+            if (presentCount <= 5 || (presentCount % 60) == 0)
+                logQnxWindowing ("Presented region #" + String (presentCount)
+                                 + " rect=" + dirty.toString()
+                                 + " stride=" + String (stride));
+        }
+
+        void notePresentForFps()
+        {
+            if (! shouldLogQnxPresentFps())
+                return;
+
+            const auto now = Time::getMillisecondCounterHiRes();
+
+            if (fpsWindowStartMs <= 0.0)
+            {
+                fpsWindowStartMs = now;
+                fpsWindowFrames = 0;
+                return;
+            }
+
+            ++fpsWindowFrames;
+            const auto elapsed = now - fpsWindowStartMs;
+
+            if (elapsed >= 1000.0)
+            {
+                logQnxWindowing ("QNX_PRESENT_FPS fps=" + String (1000.0 * (double) fpsWindowFrames / elapsed, 1)
+                                 + " frames=" + String (fpsWindowFrames)
+                                 + " windowMs=" + String (elapsed, 1)
+                                 + " mode=" + String (shouldUseFastQnxPresent() ? "fast" : "full"));
+                fpsWindowStartMs = now;
+                fpsWindowFrames = 0;
+            }
+        }
+
         Rectangle<int> bounds { component.getBounds().isEmpty() ? Rectangle<int> (0, 0, 1, 1)
                                                                  : component.getBounds() };
         Rectangle<int> pendingRepaintArea;
+        Image backingImage;                 // reused across frames in fast-present mode
+        double fpsWindowStartMs = 0.0;      // JUCE_QNX_LOG_FPS accounting
+        int fpsWindowFrames = 0;
         Point<int> bufferSize { 0, 0 };
         String title;
         screen_context_t screenContext = nullptr;
