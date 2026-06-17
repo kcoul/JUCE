@@ -19,6 +19,15 @@ namespace
 
     void logQnxWindowing (const String& message)
     {
+        // Off by default: this fires on every pointer event / window-state change,
+        // and the synchronous FileLogger write in the input hot path measurably
+        // hurts responsiveness. Set JUCE_QNX_LOG_VERBOSE=1 to re-enable for debugging.
+        // (The QNX_PRESENT_FPS metric deliberately bypasses this — see notePresentForFps.)
+        static const bool verbose = SystemStats::getEnvironmentVariable ("JUCE_QNX_LOG_VERBOSE", "0") != "0";
+
+        if (! verbose)
+            return;
+
         Logger::writeToLog ("[QNX Windowing] " + message);
     }
 
@@ -2234,10 +2243,12 @@ namespace
 
             if (elapsed >= 1000.0)
             {
-                logQnxWindowing ("QNX_PRESENT_FPS fps=" + String (1000.0 * (double) fpsWindowFrames / elapsed, 1)
-                                 + " frames=" + String (fpsWindowFrames)
-                                 + " windowMs=" + String (elapsed, 1)
-                                 + " mode=" + String (shouldUseFastQnxPresent() ? "fast" : "full"));
+                // Written directly (not via logQnxWindowing) so it stays controlled
+                // solely by JUCE_QNX_LOG_FPS, independent of the verbose-logging gate.
+                Logger::writeToLog ("[QNX Windowing] QNX_PRESENT_FPS fps=" + String (1000.0 * (double) fpsWindowFrames / elapsed, 1)
+                                    + " frames=" + String (fpsWindowFrames)
+                                    + " windowMs=" + String (elapsed, 1)
+                                    + " mode=" + String (shouldUseFastQnxPresent() ? "fast" : "full"));
                 fpsWindowStartMs = now;
                 fpsWindowFrames = 0;
             }

@@ -37,6 +37,13 @@ namespace juce
 
 static void logQnxOpenGL (const String& message)
 {
+    // Off by default (incl. the per-swap "eglSwapBuffers succeeded" line). Set
+    // JUCE_QNX_LOG_VERBOSE=1 to re-enable for debugging.
+    static const bool verbose = SystemStats::getEnvironmentVariable ("JUCE_QNX_LOG_VERBOSE", "0") != "0";
+
+    if (! verbose)
+        return;
+
     Logger::writeToLog ("[QNX OpenGL] " + message);
 }
 
