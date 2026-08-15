@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# Build the Frame Rate Bench for QNX (software present path).
+# Build the Frame Rate Bench for QNX. Linux/WSL counterpart of
+# build_frame_rate_bench_qnx.bat — keep the two in step.
+# Includes juce_opengl so ONE binary runs both BENCH_RENDERER=software and
+# BENCH_RENDERER=opengl; the two paths must be compared on identical code.
 # Mirrors extras/QNXDesktopWindowDemo/build_qnx_desktop_window_demo.sh.
 set -euo pipefail
 
@@ -24,10 +27,14 @@ COMMON=(
   -DJUCE_WEB_BROWSER=0
   -DJUCE_JACK=0
   -DJUCE_USE_FONTCONFIG=0
+  -DJUCE_MODULE_AVAILABLE_juce_opengl=1
   "-I$ROOT"
   "-I$ROOT/modules"
   "-I$BUILD_DIR"
+  "-I$QNX_TARGET/usr/include/freetype2"
 )
+
+FREETYPE_LIB="$QNX_TARGET/aarch64le/usr/lib/libfreetype.so.24"
 
 q++ "${COMMON[@]}" -c "$ROOT/modules/juce_core/juce_core.cpp" -o "$BUILD_DIR/juce_core.o"
 q++ "${COMMON[@]}" -c "$ROOT/modules/juce_core/juce_core_CompilationTime.cpp" -o "$BUILD_DIR/juce_core_CompilationTime.o"
@@ -41,6 +48,7 @@ q++ "${COMMON[@]}" -c "$ROOT/modules/juce_gui_basics/juce_gui_basics_2.cpp" -o "
 q++ "${COMMON[@]}" -c "$ROOT/modules/juce_gui_basics/juce_gui_basics_3.cpp" -o "$BUILD_DIR/juce_gui_basics_3.o"
 q++ "${COMMON[@]}" -c "$ROOT/modules/juce_gui_basics/juce_gui_basics_4.cpp" -o "$BUILD_DIR/juce_gui_basics_4.o"
 q++ "${COMMON[@]}" -c "$ROOT/modules/juce_gui_basics/juce_gui_basics_5.cpp" -o "$BUILD_DIR/juce_gui_basics_5.o"
+q++ "${COMMON[@]}" -c "$ROOT/modules/juce_opengl/juce_opengl.cpp" -o "$BUILD_DIR/juce_opengl.o"
 q++ "${COMMON[@]}" -c "$ROOT/extras/FrameRateBench/Source/Main.cpp" -o "$BUILD_DIR/Main.o"
 
 q++ "-V${TARGET}" \
@@ -56,8 +64,9 @@ q++ "-V${TARGET}" \
   "$BUILD_DIR/juce_gui_basics_3.o" \
   "$BUILD_DIR/juce_gui_basics_4.o" \
   "$BUILD_DIR/juce_gui_basics_5.o" \
+  "$BUILD_DIR/juce_opengl.o" \
   "$BUILD_DIR/Main.o" \
-  -lscreen -lsocket -lz -lexpat \
+  -lscreen -lsocket -lEGL -lGLESv2 -lz -lexpat "$FREETYPE_LIB" \
   -o "$BUILD_DIR/JUCEFrameRateBench"
 
 echo "Built: $BUILD_DIR/JUCEFrameRateBench"

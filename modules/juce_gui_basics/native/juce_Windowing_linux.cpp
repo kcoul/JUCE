@@ -537,6 +537,8 @@ private:
                     for (auto& i : originalRepaintRegion)
                         image.clear (i - totalArea.getPosition());
 
+                const auto renderStartMs = Time::getMillisecondCounterHiRes();
+
                 {
                     auto context = peer.getComponent().getLookAndFeel()
                                      .createGraphicsContext (image, -totalArea.getPosition(), adjustedList);
@@ -545,19 +547,71 @@ private:
                     peer.handlePaint (*context);
                 }
 
+                const auto presentStartMs = Time::getMillisecondCounterHiRes();
+
                 for (auto& i : originalRepaintRegion)
                    XWindowSystem::getInstance()->blitToWindow (peer.windowH, image, i, totalArea);
+
+                noteFrameTimings (presentStartMs - renderStartMs,
+                                  Time::getMillisecondCounterHiRes() - presentStartMs);
             }
 
             lastTimeImageUsed = Time::getApproximateMillisecondCounter();
         }
 
     private:
+        // Mirror of the QNX backend's JUCE_QNX_LOG_FPS accounting, with identical
+        // field names, so a QNX log and an X11 log can be compared directly. This
+        // exists to answer where a cross-platform frame-time difference actually
+        // goes: rasterisation, or handing the pixels to the display.
+        static bool shouldLogX11PresentFps()
+        {
+            static const bool enabled = SystemStats::getEnvironmentVariable ("JUCE_X11_LOG_FPS", "0") == "1";
+            return enabled;
+        }
+
+        void noteFrameTimings (double renderMs, double presentMs)
+        {
+            if (! shouldLogX11PresentFps())
+                return;
+
+            const auto now = Time::getMillisecondCounterHiRes();
+
+            if (fpsWindowStartMs <= 0.0)
+            {
+                fpsWindowStartMs = now;
+                return;
+            }
+
+            ++fpsWindowFrames;
+            fpsWindowRenderMs  += renderMs;
+            fpsWindowPresentMs += presentMs;
+
+            const auto elapsed = now - fpsWindowStartMs;
+
+            if (elapsed >= 1000.0 && fpsWindowFrames > 0)
+            {
+                Logger::writeToLog ("[X11 Windowing] X11_PRESENT_FPS fps=" + String (1000.0 * (double) fpsWindowFrames / elapsed, 1)
+                                    + " frames=" + String (fpsWindowFrames)
+                                    + " windowMs=" + String (elapsed, 1)
+                                    + " renderMs=" + String (fpsWindowRenderMs / (double) fpsWindowFrames, 2)
+                                    + " presentMs=" + String (fpsWindowPresentMs / (double) fpsWindowFrames, 2));
+                fpsWindowStartMs = now;
+                fpsWindowFrames = 0;
+                fpsWindowRenderMs = 0.0;
+                fpsWindowPresentMs = 0.0;
+            }
+        }
+
         LinuxComponentPeer& peer;
         const bool isSemiTransparentWindow;
         Image image;
         uint32 lastTimeImageUsed = 0;
         RectangleList<int> regionsNeedingRepaint;
+        double fpsWindowStartMs = 0.0;
+        int fpsWindowFrames = 0;
+        double fpsWindowRenderMs = 0.0;
+        double fpsWindowPresentMs = 0.0;
 
         bool useARGBImagesForRendering = XWindowSystem::getInstance()->canUseARGBImages();
 

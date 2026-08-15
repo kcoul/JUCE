@@ -1,0 +1,5 @@
+# These scripts are SFTP'd to a QNX/Linux target and executed there, but the
+# repo is worked on from Windows with core.autocrlf=true. Without this, a fresh
+# checkout gives them CRLF endings and the target fails them with
+# "bad interpreter: /bin/sh^M" — a confusing failure a long way from its cause.
+*.sh text eol=lf

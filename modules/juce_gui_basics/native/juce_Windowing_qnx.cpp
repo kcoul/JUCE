@@ -181,13 +181,27 @@ namespace
         return enabled;
     }
 
-    // Prototype fast software-present path: honour the accumulated dirty region
-    // (render + blit + post only what changed) and reuse a persistent backing
-    // image instead of malloc+memset-ing a full-window ARGB image every frame.
-    // Off by default so the original path stays the A/B baseline.
+    // Dirty-region software present: render + blit + post only what changed, and
+    // reuse a persistent backing image instead of malloc+memset-ing a full-window
+    // ARGB image every frame. Measured on RPi4 at 1280x1024: 16.7 -> 59.2 fps on a
+    // small-invalidation workload, and it beats X11 by 21-27% there.
+    // On by default; JUCE_QNX_FAST_PRESENT=0 restores the original full-window path.
     bool shouldUseFastQnxPresent()
     {
-        static const bool enabled = SystemStats::getEnvironmentVariable ("JUCE_QNX_FAST_PRESENT", "0") == "1";
+        static const bool enabled = SystemStats::getEnvironmentVariable ("JUCE_QNX_FAST_PRESENT", "1") != "0";
+        return enabled;
+    }
+
+    // Move the pixel copy + screen_post_window off the render thread. The X11
+    // backend gets this for free: XShmPutImage hands the buffer to the X server
+    // and returns in ~0.01ms, so the server's blit overlaps the client's next
+    // frame. QNX has no server to hand off to, so we overlap it ourselves.
+    // Measured on RPi4: present costs 13.7ms on the render thread, against a
+    // render of 14.5-116ms, so hiding it recovers nearly all of that.
+    // On by default; JUCE_QNX_THREADED_PRESENT=0 presents on the render thread.
+    bool shouldUseThreadedQnxPresent()
+    {
+        static const bool enabled = SystemStats::getEnvironmentVariable ("JUCE_QNX_THREADED_PRESENT", "1") != "0";
         return enabled;
     }
 
@@ -975,8 +989,25 @@ namespace
                                                          : embeddedFullscreen ? "SCREEN_APPLICATION_WINDOW|SCREEN_ROOT_WINDOW"
                                                                               : "SCREEN_APPLICATION_WINDOW"));
 
-            const int usage = SCREEN_USAGE_NATIVE | SCREEN_USAGE_READ | SCREEN_USAGE_WRITE
-                            | SCREEN_USAGE_OPENGL_ES2 | SCREEN_USAGE_OPENGL_ES3;
+            // The OPENGL_ES bits ask Screen for a GPU-renderable buffer, which is
+            // typically allocated in GPU-visible, CPU-uncached memory. That is the
+            // wrong trade for the software present path, which only ever memcpys
+            // into this buffer from the CPU: measured ~383 MB/s for the full-window
+            // blit (13.7ms for 1280x1024), against several GB/s for normal RAM.
+            //
+            // JUCE_QNX_CPU_BUFFERS=1 drops the GL bits so the driver may hand back
+            // CPU-friendly memory. Off by default because a window created without
+            // them may not accept an EGL surface later, which would break any app
+            // that attaches an OpenGLContext after the peer exists (as
+            // QNXDesktopWindowDemo does).
+            static const bool preferCpuBuffers
+                = SystemStats::getEnvironmentVariable ("JUCE_QNX_CPU_BUFFERS", "0") == "1";
+
+            int usage = SCREEN_USAGE_NATIVE | SCREEN_USAGE_READ | SCREEN_USAGE_WRITE;
+
+            if (! preferCpuBuffers)
+                usage |= SCREEN_USAGE_OPENGL_ES2 | SCREEN_USAGE_OPENGL_ES3;
+
             screen_set_window_property_iv (nativeWindow, SCREEN_PROPERTY_USAGE, &usage);
 
             const int format = SCREEN_FORMAT_RGBA8888;
@@ -1033,6 +1064,10 @@ namespace
 
         ~QnxComponentPeer() override
         {
+            // Before anything else: the present thread touches the native window
+            // and the backing images, so it must be joined while both still exist.
+            stopPresentThread();
+
             currentTouches.deleteAllTouchesForPeer (this);
             activeTouchContacts.clear();
             peerState->peer = nullptr;
@@ -1197,9 +1232,19 @@ namespace
                         fullBounds.getHeight(),
                         true);
 
-            LowLevelGraphicsSoftwareRenderer renderer (temp);
-            handlePaint (renderer);
+            const auto renderStartMs = Time::getMillisecondCounterHiRes();
+
+            {
+                LowLevelGraphicsSoftwareRenderer renderer (temp);
+                handlePaint (renderer);
+            }
+
+            const auto presentStartMs = Time::getMillisecondCounterHiRes();
+            presentStartStampMs = presentStartMs;
             present (temp, fullBounds);
+
+            noteFrameTimings (presentStartMs - renderStartMs,
+                              Time::getMillisecondCounterHiRes() - presentStartMs);
             pendingRepaintArea = {};
         }
 
@@ -1214,18 +1259,32 @@ namespace
                 return;
             }
 
+            const bool threaded = shouldUseThreadedQnxPresent() && startPresentThreadIfNeeded();
+
+            // Threaded present needs two buffers so frame N+1 can be rendered while
+            // frame N is still being copied out; the single-buffer path keeps using
+            // index 0 so both modes share one code path below.
+            if (! threaded)
+                backingIndex = 0;
+
+            auto& target = backingImages[backingIndex];
+
             // Reuse the backing image across frames; only (re)allocate on resize.
-            if (! backingImage.isValid()
-                || backingImage.getWidth()  != fullBounds.getWidth()
-                || backingImage.getHeight() != fullBounds.getHeight())
+            if (! target.isValid()
+                || target.getWidth()  != fullBounds.getWidth()
+                || target.getHeight() != fullBounds.getHeight())
             {
-                backingImage = Image (Image::ARGB, fullBounds.getWidth(), fullBounds.getHeight(), true);
+                // A resize invalidates whatever the presenter may still be reading.
+                if (threaded)
+                    presentThread->presentDone.wait();
+
+                target = Image (Image::ARGB, fullBounds.getWidth(), fullBounds.getHeight(), true);
                 dirty = fullBounds; // fresh buffer: everything is dirty once
             }
 
             // Clear just the dirty region (cheap), then paint the component clipped to it.
             {
-                Image::BitmapData bd (backingImage, dirty.getX(), dirty.getY(),
+                Image::BitmapData bd (target, dirty.getX(), dirty.getY(),
                                       dirty.getWidth(), dirty.getHeight(),
                                       Image::BitmapData::writeOnly);
 
@@ -1233,9 +1292,43 @@ namespace
                     std::memset (bd.getLinePointer (y), 0, (size_t) dirty.getWidth() * 4u);
             }
 
-            LowLevelGraphicsSoftwareRenderer renderer (backingImage, Point<int>(), RectangleList<int> (dirty));
-            handlePaint (renderer);
-            presentRegion (backingImage, dirty);
+            const auto renderStartMs = Time::getMillisecondCounterHiRes();
+
+            {
+                LowLevelGraphicsSoftwareRenderer renderer (target, Point<int>(), RectangleList<int> (dirty));
+                handlePaint (renderer);
+            }
+
+            const auto presentStartMs = Time::getMillisecondCounterHiRes();
+
+            if (threaded)
+            {
+                // Wait only for the PREVIOUS frame to finish presenting, then hand
+                // this one over and return. The copy then overlaps the next render,
+                // which is what makes the cost disappear from the frame time.
+                presentThread->presentDone.wait();
+                presentThread->presentDone.reset();
+
+                presentThread->job = target;
+                presentThread->jobDirty = dirty;
+                presentThread->frameReady.signal();
+
+                backingIndex ^= 1;
+
+                // Present no longer costs the render thread anything, which is
+                // exactly what the X11 backend reports (presentMs=0.01).
+                noteFrameTimings (presentStartMs - renderStartMs,
+                                  Time::getMillisecondCounterHiRes() - presentStartMs);
+            }
+            else
+            {
+                presentStartStampMs = presentStartMs;
+                presentRegion (target, dirty);
+
+                noteFrameTimings (presentStartMs - renderStartMs,
+                                  Time::getMillisecondCounterHiRes() - presentStartMs);
+            }
+
             pendingRepaintArea = {};
         }
 
@@ -2004,8 +2097,33 @@ namespace
             return true;
         }
 
+        bool startPresentThreadIfNeeded()
+        {
+            if (presentThread == nullptr)
+            {
+                presentThread = std::make_unique<PresentThread> (*this);
+                presentThread->startThread (Thread::Priority::high);
+                logQnxWindowing ("Started threaded present");
+            }
+
+            return presentThread->isThreadRunning();
+        }
+
+        void stopPresentThread()
+        {
+            if (presentThread != nullptr)
+            {
+                logQnxWindowing ("Stopping threaded present");
+                presentThread.reset();      // dtor drains and joins
+            }
+        }
+
         void destroyWindowBuffers()
         {
+            // The presenter writes into these buffers; it must be idle before the
+            // window they target goes away.
+            stopPresentThread();
+
             if (windowBuffersCreated && nativeWindow != nullptr)
             {
                 logQnxWindowing ("Destroying Screen window buffers");
@@ -2149,6 +2267,8 @@ namespace
                 std::memcpy (dstLine, srcLine, (size_t) imageBounds.getWidth() * 4u);
             }
 
+            blitEndMs = Time::getMillisecondCounterHiRes();
+
             const int dirtyRect[4] = { 0, 0, imageBounds.getWidth(), imageBounds.getHeight() };
             const auto postResult = screen_post_window (nativeWindow, buffer, 1, dirtyRect, 0);
 
@@ -2205,6 +2325,8 @@ namespace
                 std::memcpy (dstLine, srcLine, (size_t) dirty.getWidth() * bytesPerPixel);
             }
 
+            blitEndMs = Time::getMillisecondCounterHiRes();
+
             // Screen dirty rects are [x1, y1, x2, y2].
             const int dirtyRect[4] = { dirty.getX(), dirty.getY(), dirty.getRight(), dirty.getBottom() };
             const auto postResult = screen_post_window (nativeWindow, buffer, 1, dirtyRect, 0);
@@ -2222,6 +2344,24 @@ namespace
                 logQnxWindowing ("Presented region #" + String (presentCount)
                                  + " rect=" + dirty.toString()
                                  + " stride=" + String (stride));
+        }
+
+        // Splits a frame into rasterisation vs presentation, so a QNX-vs-Linux
+        // throughput gap can be attributed instead of guessed at. Costs two clock
+        // reads per frame and only accumulates when JUCE_QNX_LOG_FPS=1.
+        void noteFrameTimings (double renderMs, double presentMs)
+        {
+            if (! shouldLogQnxPresentFps())
+                return;
+
+            fpsWindowRenderMs  += renderMs;
+            fpsWindowPresentMs += presentMs;
+
+            // blitEndMs is stamped inside present()/presentRegion() right after the
+            // pixel copy and before screen_post_window, so this separates the cost
+            // of moving pixels from the cost of waiting for the display to take them.
+            if (blitEndMs > 0.0 && presentStartStampMs > 0.0)
+                fpsWindowBlitMs += blitEndMs - presentStartStampMs;
         }
 
         void notePresentForFps()
@@ -2248,18 +2388,82 @@ namespace
                 Logger::writeToLog ("[QNX Windowing] QNX_PRESENT_FPS fps=" + String (1000.0 * (double) fpsWindowFrames / elapsed, 1)
                                     + " frames=" + String (fpsWindowFrames)
                                     + " windowMs=" + String (elapsed, 1)
-                                    + " mode=" + String (shouldUseFastQnxPresent() ? "fast" : "full"));
+                                    + " mode=" + String (shouldUseFastQnxPresent() ? "fast" : "full")
+                                    + " renderMs=" + String (fpsWindowRenderMs  / (double) fpsWindowFrames, 2)
+                                    + " presentMs=" + String (fpsWindowPresentMs / (double) fpsWindowFrames, 2)
+                                    + " blitMs=" + String (fpsWindowBlitMs / (double) fpsWindowFrames, 2)
+                                    + " postMs=" + String ((fpsWindowPresentMs - fpsWindowBlitMs) / (double) fpsWindowFrames, 2));
                 fpsWindowStartMs = now;
                 fpsWindowFrames = 0;
+                fpsWindowRenderMs = 0.0;
+                fpsWindowPresentMs = 0.0;
+                fpsWindowBlitMs = 0.0;
             }
         }
 
         Rectangle<int> bounds { component.getBounds().isEmpty() ? Rectangle<int> (0, 0, 1, 1)
                                                                  : component.getBounds() };
         Rectangle<int> pendingRepaintArea;
-        Image backingImage;                 // reused across frames in fast-present mode
+        // Presents frames handed over by the render thread. Owns nothing: the
+        // handshake below guarantees the render thread is not touching the image
+        // it is given, and that the window outlives the thread.
+        class PresentThread final : public Thread
+        {
+        public:
+            explicit PresentThread (QnxComponentPeer& p)
+                : Thread ("JUCE QNX Present"), owner (p)
+            {
+                presentDone.signal();   // idle to begin with
+            }
+
+            ~PresentThread() override
+            {
+                signalThreadShouldExit();
+                frameReady.signal();
+                stopThread (2000);
+            }
+
+            void run() override
+            {
+                while (! threadShouldExit())
+                {
+                    if (! frameReady.wait (200))
+                        continue;
+
+                    if (threadShouldExit())
+                        break;
+
+                    if (job.isValid())
+                        owner.presentRegion (job, jobDirty);
+
+                    // Release before signalling: the render thread may reuse this
+                    // buffer immediately, and a second reference would make JUCE
+                    // deep-copy the image on the next write.
+                    job = Image();
+                    presentDone.signal();
+                }
+
+                job = Image();
+                presentDone.signal();
+            }
+
+            Image job;
+            Rectangle<int> jobDirty;
+            WaitableEvent frameReady;
+            WaitableEvent presentDone { true };   // manual reset
+            QnxComponentPeer& owner;
+        };
+
+        std::unique_ptr<PresentThread> presentThread;
+        Image backingImages[2];             // double-buffered for threaded present
+        int backingIndex = 0;
         double fpsWindowStartMs = 0.0;      // JUCE_QNX_LOG_FPS accounting
         int fpsWindowFrames = 0;
+        double fpsWindowRenderMs = 0.0;     // rasterisation time this window
+        double fpsWindowPresentMs = 0.0;    // blit + screen_post time this window
+        double fpsWindowBlitMs = 0.0;       // pixel-copy portion of the above
+        double blitEndMs = 0.0;             // stamped between blit and post
+        double presentStartStampMs = 0.0;   // start of the present phase
         Point<int> bufferSize { 0, 0 };
         String title;
         screen_context_t screenContext = nullptr;

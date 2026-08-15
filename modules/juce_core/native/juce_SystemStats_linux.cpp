@@ -288,6 +288,15 @@ void CPUInformation::initialise() noexcept
         auto result = sysctl (mib, numElementsInArray (mib), &numCPUs, &numCPUsSize, nullptr, 0);
         return result == 0 ? numCPUs : 1;
     }();
+  #elif JUCE_QNX
+    // QNX has no Linux-style /proc/cpuinfo, so the "processor" parsing used
+    // below finds nothing and yields 1 on every SMP board - which then silently
+    // sizes every JUCE thread pool to a single thread. Ask POSIX instead.
+    numLogicalCPUs = numPhysicalCPUs = []
+    {
+        const auto onlineCPUs = (int) sysconf (_SC_NPROCESSORS_ONLN);
+        return onlineCPUs > 0 ? onlineCPUs : 1;
+    }();
   #else
     auto flags = getCpuInfo ("flags");
 

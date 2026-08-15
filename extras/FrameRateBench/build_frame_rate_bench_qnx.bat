@@ -1,5 +1,7 @@
 @echo off
-REM Build the Frame Rate Bench for QNX from a Windows host (software present path).
+REM Build the Frame Rate Bench for QNX from a Windows host.
+REM Includes juce_opengl so ONE binary can run both BENCH_RENDERER=software and
+REM BENCH_RENDERER=opengl - the two paths must be compared on identical code.
 REM Mirrors extras\QNXDesktopWindowDemo\build_qnx_desktop_window_demo.bat.
 setlocal
 
@@ -20,7 +22,7 @@ if not exist "%BUILD_DIR%" mkdir "%BUILD_DIR%"
 
 cmake -DROOT="%ROOT%" -DOUTPUT_HEADER="%GENERATED_HEADER%" -P "%ROOT%\extras\FrameRateBench\cmake\GenerateBuildVersion.cmake" || exit /b 1
 
-set COMMON=-V%TARGET% -std=gnu++17 -O2 -DJUCE_GLOBAL_MODULE_SETTINGS_INCLUDED=1 -DJUCE_USE_CURL=0 -DJUCE_WEB_BROWSER=0 -DJUCE_JACK=0 -DJUCE_USE_FONTCONFIG=0 -I"%ROOT%" -I"%ROOT%\modules" -I"%BUILD_DIR%" -I"%QNX_TARGET%/usr/include/freetype2"
+set COMMON=-V%TARGET% -std=gnu++17 -O2 -DJUCE_GLOBAL_MODULE_SETTINGS_INCLUDED=1 -DJUCE_USE_CURL=0 -DJUCE_WEB_BROWSER=0 -DJUCE_JACK=0 -DJUCE_USE_FONTCONFIG=0 -DJUCE_MODULE_AVAILABLE_juce_opengl=1 -I"%ROOT%" -I"%ROOT%\modules" -I"%BUILD_DIR%" -I"%QNX_TARGET%/usr/include/freetype2"
 
 q++ %COMMON% -c "%ROOT%\modules\juce_core\juce_core.cpp" -o "%BUILD_DIR%\juce_core.o" || exit /b 1
 q++ %COMMON% -c "%ROOT%\modules\juce_core\juce_core_CompilationTime.cpp" -o "%BUILD_DIR%\juce_core_CompilationTime.o" || exit /b 1
@@ -34,6 +36,7 @@ q++ %COMMON% -c "%ROOT%\modules\juce_gui_basics\juce_gui_basics_2.cpp" -o "%BUIL
 q++ %COMMON% -c "%ROOT%\modules\juce_gui_basics\juce_gui_basics_3.cpp" -o "%BUILD_DIR%\juce_gui_basics_3.o" || exit /b 1
 q++ %COMMON% -c "%ROOT%\modules\juce_gui_basics\juce_gui_basics_4.cpp" -o "%BUILD_DIR%\juce_gui_basics_4.o" || exit /b 1
 q++ %COMMON% -c "%ROOT%\modules\juce_gui_basics\juce_gui_basics_5.cpp" -o "%BUILD_DIR%\juce_gui_basics_5.o" || exit /b 1
+q++ %COMMON% -c "%ROOT%\modules\juce_opengl\juce_opengl.cpp" -o "%BUILD_DIR%\juce_opengl.o" || exit /b 1
 q++ %COMMON% -c "%ROOT%\extras\FrameRateBench\Source\Main.cpp" -o "%BUILD_DIR%\Main.o" || exit /b 1
 
 q++ -V%TARGET% ^
@@ -49,8 +52,9 @@ q++ -V%TARGET% ^
     "%BUILD_DIR%\juce_gui_basics_3.o" ^
     "%BUILD_DIR%\juce_gui_basics_4.o" ^
     "%BUILD_DIR%\juce_gui_basics_5.o" ^
+    "%BUILD_DIR%\juce_opengl.o" ^
     "%BUILD_DIR%\Main.o" ^
-    -lscreen -lsocket -lz -lexpat "%FREETYPE_LIB%" ^
+    -lscreen -lsocket -lEGL -lGLESv2 -lz -lexpat "%FREETYPE_LIB%" ^
     -o "%BUILD_DIR%\JUCEFrameRateBench" || exit /b 1
 
 echo Built: %BUILD_DIR%\JUCEFrameRateBench

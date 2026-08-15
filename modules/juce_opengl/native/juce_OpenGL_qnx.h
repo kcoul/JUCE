@@ -47,6 +47,17 @@ static void logQnxOpenGL (const String& message)
     Logger::writeToLog ("[QNX OpenGL] " + message);
 }
 
+// Counterpart to the software present path's QNX_PRESENT_FPS metric (see
+// juce_Windowing_qnx.cpp). Deliberately uses the SAME key and is controlled by
+// the SAME env var, so one grep yields comparable numbers for either renderer;
+// the mode= field is what distinguishes them. Independent of the verbose gate,
+// so FPS can be measured without paying for per-swap log spam.
+static bool shouldLogQnxOpenGLFps()
+{
+    static const bool enabled = SystemStats::getEnvironmentVariable ("JUCE_QNX_LOG_FPS", "0") == "1";
+    return enabled;
+}
+
 class OpenGLContext::NativeContext
 {
 public:
@@ -223,6 +234,8 @@ public:
             {
                 logQnxOpenGL ("eglSwapBuffers succeeded #" + String (swapCount));
             }
+
+            noteSwapForFps();
         }
     }
 
@@ -264,6 +277,38 @@ public:
     void removeListener (NativeContextListener&) {}
 
 private:
+    // Called once per successful eglSwapBuffers, on the GL render thread with
+    // `mutex` already held by swapBuffers(), so the counters need no extra lock.
+    void noteSwapForFps()
+    {
+        if (! shouldLogQnxOpenGLFps())
+            return;
+
+        const auto now = Time::getMillisecondCounterHiRes();
+
+        if (fpsWindowStartMs <= 0.0)
+        {
+            fpsWindowStartMs = now;
+            fpsWindowFrames = 0;
+            return;
+        }
+
+        ++fpsWindowFrames;
+        const auto elapsed = now - fpsWindowStartMs;
+
+        if (elapsed >= 1000.0)
+        {
+            // Written straight to the Logger (not via logQnxOpenGL) so it stays
+            // controlled solely by JUCE_QNX_LOG_FPS.
+            Logger::writeToLog ("[QNX OpenGL] QNX_PRESENT_FPS fps=" + String (1000.0 * (double) fpsWindowFrames / elapsed, 1)
+                                + " frames=" + String (fpsWindowFrames)
+                                + " windowMs=" + String (elapsed, 1)
+                                + " mode=opengl");
+            fpsWindowStartMs = now;
+            fpsWindowFrames = 0;
+        }
+    }
+
     static int getContextVersion (OpenGLVersion version)
     {
         return version == OpenGLVersion::openGL4_3 ? 3 : 2;
@@ -428,6 +473,8 @@ private:
     OpenGLVersion versionRequired = OpenGLVersion::defaultGLVersion;
     int swapInterval = 0;
     int swapCount = 0;
+    double fpsWindowStartMs = 0.0;      // JUCE_QNX_LOG_FPS accounting
+    int fpsWindowFrames = 0;
     bool hasInitialised = false;
 
     inline static EGLDisplay sharedDisplay = EGL_NO_DISPLAY;

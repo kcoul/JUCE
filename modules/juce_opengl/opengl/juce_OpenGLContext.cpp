@@ -436,10 +436,17 @@ public:
             {
                 if (isUpdating)
                 {
-                   #if JUCE_QNX
-                    if (context.continuousRepaint)
-                        validArea.clear();
-                   #endif
+                    // QNX used to clear the valid area here, forcing a
+                    // full component repaint every frame under continuous repainting.
+                    // That defeats JUCE's valid-region tracking, which is worth 4.5-11x
+                    // on a realistic "one control changed" workload (measured on RPi4:
+                    // 16.5 -> 74.1 fps at complexity 1500).
+                    //
+                    // It is not needed for correctness: paintComponent() renders into
+                    // cachedImageFrameBuffer, an FBO that persists across swaps, and
+                    // drawComponentBuffer() re-copies that whole texture to the back
+                    // buffer every frame, so EGL's default EGL_BUFFER_DESTROYED swap
+                    // semantics cannot corrupt anything.
 
                     paintComponent (currentAreaAndScale);
 
