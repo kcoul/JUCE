@@ -16,7 +16,7 @@
    framework to you, and you must discontinue the installation or download
    process and cease use of the JUCE framework.
 
-   JUCE End User Licence Agreement: https://juce.com/legal/juce-8-licence/
+   JUCE End User Licence Agreement: https://juce.com/legal/juce-9-licence/
    JUCE Privacy Policy: https://juce.com/juce-privacy-policy
    JUCE Website Terms of Service: https://juce.com/juce-website-terms-of-service/
 
@@ -63,6 +63,9 @@ extern "C"
 
 #include <math.h>
 
+#pragma push_macro ("_POSIX_C_SOURCE")
+#undef _POSIX_C_SOURCE
+
 #define is_windows_path serd_is_windows_path
 
 #include "serd/src/base64.c"
@@ -98,6 +101,8 @@ extern "C"
 #include "lilv/src/util.c"
 #include "lilv/src/world.c"
 #include "lilv/src/zix/tree.c"
+
+#pragma pop_macro ("_POSIX_C_SOURCE")
 
 #undef NS_RDF
 #undef NS_XSD

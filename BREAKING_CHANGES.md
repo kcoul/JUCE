@@ -1,6 +1,207 @@
 # JUCE breaking changes
 
-# develop
+# Version 9.0.1
+
+## Change
+
+zlib, libjpeg, libpng, and libflac are now built in C language mode, instead
+of as C++.
+
+**Possible Issues**
+
+Symbols in these libraries are no longer wrapped in C++ namespaces. If JUCE is
+linked into a binary that separately includes/links zlib, libjpeg, libpng,
+and/or libflac, then the internal symbols in JUCE may conflict with the symbols
+from the external copy of the library. This will result in ODR violations, and
+potentially linker errors.
+
+**Workaround**
+
+If your project already includes external copies of these libraries, set the
+preprocessor definitions JUCE_INCLUDE_ZLIB_CODE, JUCE_INCLUDE_JPEGLIB_CODE,
+JUCE_INCLUDE_PNGLIB_CODE, and/or JUCE_INCLUDE_FLAC_CODE to 0 in order to
+disable the copies bundled in JUCE. You may also set the definitions
+JUCE_ZLIB_INCLUDE_PATH, JUCE_JPEGLIB_INCLUDE_PATH, JUCE_PNGLIB_INCLUDE_PATH,
+and/or JUCE_FLAC_INCLUDE_PATH to set custom include paths for the library
+headers.
+
+**Rationale**
+
+Building these libraries as C code means that the copies vendored by JUCE
+require fewer intrusive changes. Building them as C++ historically required
+internal changes due to (for example) C++'s stricter type-checking rules.
+Building as C should allow for quicker, smoother upgrades of vendored
+dependencies in the future. Another consideration is that the C language has
+different semantics to C++ in some respects, so building as C is more likely to
+produce a binary that has the behaviour intended by the authors.
+
+
+## Change
+
+The WebBrowserComponent native integrations package location changed from
+modules/juce_gui_extra/native/javascript to
+modules/juce_gui_extra/native/typescript/webview-interop.
+
+**Possible Issues**
+
+Applications linking directly to the original in-source package location will
+fail to load the library.
+
+**Workaround**
+
+The package location should be upgraded to reflect the new in-source location.
+Alternatively, projects using a package manager can use the
+@juce-framework/webview package from npm.
+
+Javascript projects relying on the original index.js file can directly import
+webview-interop/dist/index.js instead.
+
+**Rationale**
+
+The WebBrowserComponent native integrations package has been translated to
+TypeScript and prepared to be published as a public npm package. This provides
+type information for projects consuming this package, but it imposes new
+requirements on the directory structure.
+
+
+# Version 9.0.0
+
+## Change
+
+Multi-touch is now disabled on Windows by default.
+
+**Possible Issues**
+
+Applications that rely on multi-touch input on Windows will no longer receive
+multi-touch events.
+
+**Workaround**
+
+To explicitly enable multi-touch support on Windows, call
+`TopLevelWindow::setUsingWindowsMultiTouch (true)` in desktop applications, or
+override `PluginEditor::usesWindowsMultiTouch()` in plugins and return `true`.
+
+**Rationale**
+
+Enabling multi-touch on Windows means the app cannot respond to built-in
+gestures, such as pinch-to-zoom. This is likely to be an unwanted default. The
+reason is that if `registerTouchWindow()` is called for an HWND its
+`DefWindowProc` will no longer emit gesture events. This means that `WM_GESTURE`
+messages aren't sent, and no callbacks will be made to
+e.g. `Component::mouseMagnify()`.
+
+
+## Change
+
+The function Drawable::createFromSVG (const XmlElement& svgDocument) has been
+removed.
+
+**Possible Issues**
+
+Code that calls the function will fail to compile.
+
+**Workaround**
+
+Use the createFromSVGFile() or createFromSVGString() functions instead.
+
+**Rationale**
+
+The SVG parsing features in JUCE have been fundamentally reworked, and they now
+depend on the lunasvg library. Lunasvg does its own XML parsing, and is not
+compatible with the juce::XmlElement type.
+
+
+## Change
+
+The return types of `DrawableShape::getStrokeType()` and
+`DrawableShape::getDashLengths()` changed from `const PathStrokeType&` to
+`PathStrokeType`, and from `const Array<float>&` to `Span<const float>`
+respectively. The parameter type to
+`DrawableShape::setDashLengths (const Array<float>&)` was changed to
+`Span<const float>`.
+
+**Possible Issues**
+
+Code that calls these functions may fail to compile.
+
+**Workaround**
+
+It should be easy to adjust the calling code to handle the new return and
+parameter types.
+
+**Rationale**
+
+The stroke options were extended and generalised to text rendering. The new
+types are a better fit for the adjusted design.
+
+
+## Change
+
+The `Drawable` class no longer inherits from `Component`.
+
+**Possible Issues**
+
+Code that depended on `Drawable` objects inheriting from `Component` will fail
+to compile.
+
+**Workaround**
+
+Affected code can use the new `DrawableComponent` class to wrap `Drawable`
+objects in a `Component` if necessary. There are many examples in the JUCE
+codebase where this transition has already been made.
+
+**Rationale**
+
+This change prepares the way for moving the `Drawable` classes together with the
+SVG parser into the juce_graphics module. This allows us to avoid a dependency
+on the heavyweight `Component` class and juce_gui_basics module, and enables
+using the `Drawable` classes and SVG parser in headless use-cases.
+
+
+## Change
+
+JUCE now uses EGL, rather than GLX, to create an OpenGL context on Linux.
+
+**Possible Issues**
+
+EGL is a new dependency, and it may need to be added to your operating system.
+
+**Workaround**
+
+Install the libegl-dev package (Debian) or the equivalent for your operating
+system.
+
+**Rationale**
+
+Using EGL, rather than GLX, broadens the range of hardware we can deploy JUCE
+on.
+
+
+# Version 8.0.13
+
+## Change
+
+72e1ba6a80bb163633622ee9694856cacc24e5b9 made AudioProcessor::createEditor()
+private. It also incorrectly renamed createEditorIfNeeded() to
+createEditorIfNecessary(). The old naming has now be reinstated.
+
+**Possible Issues**
+
+Code that calls createEditor() directly will fail to compile.
+
+**Workaround**
+
+To create an editor for an AudioProcessor, call
+AudioProcessor::createEditorAndMakeActive().
+
+**Rationale**
+
+In order for AudioProcessor::getActiveEditor() to return the correct result,
+the AudioProcessor must store a pointer to the newly-created editor after
+createEditor() returns. Allowing users to call createEditor() directly would
+prevent the internal editor pointer from being updated, breaking the behaviour
+of getActiveEditor().
+
 
 ## Change
 
@@ -131,7 +332,7 @@ The following member functions of Font have been removed:
 - Font::getStringWidth()
 - Font::getStringWidthFloat()
 
-The signatures of the following functions have changed, removing the 
+The signatures of the following functions have changed, removing the
 TypefaceMetricsKind argument:
 - Typeface::getOutlineForGlyph()
 - Typeface::getGlyphBounds()
@@ -427,10 +628,10 @@ containers, and returning a FocusTraverser object created using the
 
 **Rationale**
 
-Disabled components are typically rendered in a dimmed or inactive state, but 
+Disabled components are typically rendered in a dimmed or inactive state, but
 are still prominently visible for sighted users. The old behaviour made these
-components entirely missing from the accessibility tree, making them 
-non-discoverable with screen readers. 
+components entirely missing from the accessibility tree, making them
+non-discoverable with screen readers.
 
 This was in contrast to the behaviour of native OS components, that are still
 accessible using screen readers, but their disabled/dimmed state is also

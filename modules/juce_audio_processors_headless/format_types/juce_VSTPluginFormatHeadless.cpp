@@ -16,7 +16,7 @@
    framework to you, and you must discontinue the installation or download
    process and cease use of the JUCE framework.
 
-   JUCE End User Licence Agreement: https://juce.com/legal/juce-8-licence/
+   JUCE End User Licence Agreement: https://juce.com/legal/juce-9-licence/
    JUCE Privacy Policy: https://juce.com/juce-privacy-policy
    JUCE Website Terms of Service: https://juce.com/juce-website-terms-of-service/
 
@@ -167,30 +167,34 @@ void VSTPluginFormatHeadless::recursiveFileSearch (StringArray& results, const F
 
 FileSearchPath VSTPluginFormatHeadless::getDefaultLocationsToSearch()
 {
-   #if JUCE_MAC
-    return FileSearchPath ("~/Library/Audio/Plug-Ins/VST;/Library/Audio/Plug-Ins/VST");
-   #elif JUCE_LINUX || JUCE_BSD || JUCE_ANDROID
-    return FileSearchPath (SystemStats::getEnvironmentVariable ("VST_PATH",
-                                                                "/usr/lib/vst;/usr/local/lib/vst;~/.vst")
-                             .replace (":", ";"));
-   #elif JUCE_WINDOWS
-    auto programFiles = File::getSpecialLocation (File::globalApplicationsDirectory).getFullPathName();
+    auto defaults = std::invoke ([]() -> FileSearchPath
+    {
+       #if JUCE_MAC
+        return { "~/Library/Audio/Plug-Ins/VST;/Library/Audio/Plug-Ins/VST" };
+       #elif JUCE_LINUX || JUCE_BSD || JUCE_ANDROID
+        return { "/usr/lib/vst;/usr/local/lib/vst;~/.vst" };
+       #elif JUCE_WINDOWS
+        auto programFiles = File::getSpecialLocation (File::globalApplicationsDirectory).getFullPathName();
 
-    FileSearchPath paths;
-    paths.add (WindowsRegistry::getValue ("HKEY_LOCAL_MACHINE\\Software\\VST\\VSTPluginsPath"));
-    paths.addIfNotAlreadyThere (programFiles + "\\Steinberg\\VstPlugins");
-    paths.addIfNotAlreadyThere (programFiles + "\\VstPlugins");
-    paths.removeRedundantPaths();
-    return paths;
-   #elif JUCE_IOS
-    // on iOS you can only load plug-ins inside the hosts bundle folder
-    CFUniquePtr<CFURLRef> relativePluginDir (CFBundleCopyBuiltInPlugInsURL (CFBundleGetMainBundle()));
-    CFUniquePtr<CFURLRef> pluginDir (CFURLCopyAbsoluteURL (relativePluginDir.get()));
+        FileSearchPath paths;
+        paths.add (WindowsRegistry::getValue ("HKEY_LOCAL_MACHINE\\Software\\VST\\VSTPluginsPath"));
+        paths.addIfNotAlreadyThere (programFiles + "\\Steinberg\\VstPlugins");
+        paths.addIfNotAlreadyThere (programFiles + "\\VstPlugins");
+        paths.removeRedundantPaths();
+        return paths;
+       #elif JUCE_IOS
+        // on iOS you can only load plug-ins inside the hosts bundle folder
+        CFUniquePtr<CFURLRef> relativePluginDir (CFBundleCopyBuiltInPlugInsURL (CFBundleGetMainBundle()));
+        CFUniquePtr<CFURLRef> pluginDir (CFURLCopyAbsoluteURL (relativePluginDir.get()));
 
-    CFUniquePtr<CFStringRef> path (CFURLCopyFileSystemPath (pluginDir.get(), kCFURLPOSIXPathStyle));
-    FileSearchPath retval (String (CFStringGetCStringPtr (path.get(), kCFStringEncodingUTF8)));
-    return retval;
-   #endif
+        CFUniquePtr<CFStringRef> path (CFURLCopyFileSystemPath (pluginDir.get(), kCFURLPOSIXPathStyle));
+        return { String (CFStringGetCStringPtr (path.get(), kCFStringEncodingUTF8)) };
+       #endif
+    });
+
+    FileSearchPath result { SystemStats::getEnvironmentVariable ("VST_PATH", "").replace (":", ";") };
+    result.addPath (defaults);
+    return result;
 }
 
 AudioPluginInstance* VSTPluginFormatHeadless::createCustomVSTFromMainCall (void* entryPointFunction,

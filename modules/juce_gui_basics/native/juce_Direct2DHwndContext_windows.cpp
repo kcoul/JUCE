@@ -16,7 +16,7 @@
    framework to you, and you must discontinue the installation or download
    process and cease use of the JUCE framework.
 
-   JUCE End User Licence Agreement: https://juce.com/legal/juce-8-licence/
+   JUCE End User Licence Agreement: https://juce.com/legal/juce-9-licence/
    JUCE Privacy Policy: https://juce.com/juce-privacy-policy
    JUCE Website Terms of Service: https://juce.com/juce-website-terms-of-service/
 
@@ -86,7 +86,7 @@ public:
         swapChainDescription.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
         swapChainDescription.BufferCount = 2;
         swapChainDescription.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
-        swapChainDescription.Flags = 0;
+        swapChainDescription.Flags = swapChainFlags;
 
         swapChainDescription.Scaling = DXGI_SCALING_STRETCH;
         swapChainDescription.AlphaMode = DXGI_ALPHA_MODE_PREMULTIPLIED;
@@ -132,8 +132,15 @@ public:
 
         buffer = nullptr;
 
-        if (const auto hr = chain->ResizeBuffers (0, (UINT) scaledSize.getWidth(), (UINT) scaledSize.getHeight(), DXGI_FORMAT_B8G8R8A8_UNORM, 0); FAILED (hr))
+        if (const auto hr = chain->ResizeBuffers (0,
+                                                  (UINT) scaledSize.getWidth(),
+                                                  (UINT) scaledSize.getHeight(),
+                                                  DXGI_FORMAT_B8G8R8A8_UNORM,
+                                                  swapChainFlags);
+            FAILED (hr))
+        {
             return hr;
+        }
 
         ComSmartPtr<IDXGIDevice> device;
         JUCE_BEGIN_IGNORE_WARNINGS_GCC_LIKE ("-Wlanguage-extension-token")
@@ -169,6 +176,7 @@ public:
         return buffer;
     }
 
+    static constexpr uint32 swapChainFlags = DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT;
     static constexpr uint32 presentSyncInterval = 1;
     static constexpr uint32 presentFlags = 0;
 
@@ -404,6 +412,20 @@ public:
     ComSmartPtr<ID2D1Image> getDeviceContextTarget() const override
     {
         return swap.getBuffer();
+    }
+
+    ComSmartPtr<IDWriteRenderingParams> getDefaultTextRenderingParams() const override
+    {
+        if (auto monitor = MonitorFromWindow (hwnd, MONITOR_DEFAULTTONULL))
+        {
+            ComSmartPtr<IDWriteRenderingParams> result;
+            getDirectWriteFactory()->CreateMonitorRenderingParams (monitor, result.resetAndGetPointerAddress());
+
+            if (result != nullptr)
+                return result;
+        }
+
+        return Pimpl::getDefaultTextRenderingParams();
     }
 
     void setSize (Rectangle<int> size)

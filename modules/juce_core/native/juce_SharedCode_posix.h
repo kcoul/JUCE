@@ -16,7 +16,7 @@
    framework to you, and you must discontinue the installation or download
    process and cease use of the JUCE framework.
 
-   JUCE End User Licence Agreement: https://juce.com/legal/juce-8-licence/
+   JUCE End User Licence Agreement: https://juce.com/legal/juce-9-licence/
    JUCE Privacy Policy: https://juce.com/juce-privacy-policy
    JUCE Website Terms of Service: https://juce.com/juce-website-terms-of-service/
 
@@ -177,7 +177,7 @@ inline int juce_siginterrupt ([[maybe_unused]] int sig, [[maybe_unused]] int fla
 //==============================================================================
 namespace
 {
-   #if JUCE_LINUX || (JUCE_IOS && (! TARGET_OS_MACCATALYST) && (! __DARWIN_ONLY_64_BIT_INO_T)) // (this iOS stuff is to avoid a simulator bug)
+   #if defined (__GLIBC__) || (JUCE_IOS && (! TARGET_OS_MACCATALYST) && (! __DARWIN_ONLY_64_BIT_INO_T)) // (this iOS stuff is to avoid a simulator bug)
     using juce_statStruct = struct stat64;
     #define JUCE_STAT  stat64
    #else
@@ -321,9 +321,9 @@ static bool setFileModeFlags (const String& fullPath, mode_t flags, bool shouldS
     info.st_mode &= 0777;
 
     if (shouldSet)
-        info.st_mode |= flags;
+        info.st_mode |= (decltype (info.st_mode)) flags;
     else
-        info.st_mode &= ~flags;
+        info.st_mode &= (decltype (info.st_mode)) ~flags;
 
     return chmod (fullPath.toUTF8(), (mode_t) info.st_mode) == 0;
 }
@@ -962,17 +962,14 @@ public:
 
     void apply ([[maybe_unused]] PosixThreadAttribute& attr) const
     {
-        #if JUCE_LINUX || JUCE_BSD
-         const struct sched_param param { getPriority() };
+       #if JUCE_LINUX || JUCE_BSD
+        struct sched_param param{};
+        param.sched_priority = getPriority();
 
-         pthread_attr_setinheritsched (attr.get(), PTHREAD_EXPLICIT_SCHED);
-         pthread_attr_setschedpolicy (attr.get(), getScheduler());
-         pthread_attr_setschedparam (attr.get(), &param);
-        #elif JUCE_QNX
-         // QNX thread creation is more reliable when inheriting the process defaults
-         // for non-realtime worker threads, rather than forcing explicit SCHED_OTHER attrs.
-         ignoreUnused (attr);
-        #endif
+        pthread_attr_setinheritsched (attr.get(), PTHREAD_EXPLICIT_SCHED);
+        pthread_attr_setschedpolicy (attr.get(), getScheduler());
+        pthread_attr_setschedparam (attr.get(), &param);
+       #endif
     }
 
     constexpr int getScheduler() const { return scheduler; }
