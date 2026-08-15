@@ -96,8 +96,8 @@ struct Conversion
         Factory::splitIntoPackets (msg.bytes, 6, [&] (SysEx7::Kind kind, Span<const std::byte> bytesThisTime)
         {
             const auto packet = Factory::Detail::makeSysEx (msg.group, kind, bytesThisTime);
-            const PacketX4 paddedPacket { packet[0], packet[1], 0, 0 };
-            callback (View (paddedPacket.data()));
+            const uint32_t paddedPacket[] { packet[0], packet[1], 0, 0 };
+            callback (View (paddedPacket));
         });
     }
 

@@ -177,7 +177,7 @@ inline int juce_siginterrupt ([[maybe_unused]] int sig, [[maybe_unused]] int fla
 //==============================================================================
 namespace
 {
-   #if JUCE_LINUX || (JUCE_IOS && (! TARGET_OS_MACCATALYST) && (! __DARWIN_ONLY_64_BIT_INO_T)) // (this iOS stuff is to avoid a simulator bug)
+   #if defined (__GLIBC__) || (JUCE_IOS && (! TARGET_OS_MACCATALYST) && (! __DARWIN_ONLY_64_BIT_INO_T)) // (this iOS stuff is to avoid a simulator bug)
     using juce_statStruct = struct stat64;
     #define JUCE_STAT  stat64
    #else
@@ -321,9 +321,9 @@ static bool setFileModeFlags (const String& fullPath, mode_t flags, bool shouldS
     info.st_mode &= 0777;
 
     if (shouldSet)
-        info.st_mode |= flags;
+        info.st_mode |= (decltype (info.st_mode)) flags;
     else
-        info.st_mode &= ~flags;
+        info.st_mode &= (decltype (info.st_mode)) ~flags;
 
     return chmod (fullPath.toUTF8(), (mode_t) info.st_mode) == 0;
 }

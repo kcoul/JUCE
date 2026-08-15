@@ -48,7 +48,8 @@ if(DEFINED JUCE_JUCEAIDE_PATH)
     set(JUCE_JUCEAIDE_NAME "${binary_name}" CACHE INTERNAL "The name of the juceaide program")
 elseif(JUCE_BUILD_HELPER_TOOLS)
     # Build the tool for the current system
-    juce_add_console_app(juceaide _NO_RESOURCERC)
+    juce_add_console_app(juceaide _NO_RESOURCERC
+        NEEDS_CURL FALSE)
 
     target_sources(juceaide PRIVATE Main.cpp)
 
