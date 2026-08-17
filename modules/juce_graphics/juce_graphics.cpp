@@ -112,6 +112,14 @@
  #ifndef JUCE_USE_FONTCONFIG
   #define JUCE_USE_FONTCONFIG 1
  #endif
+#elif JUCE_QNX
+ #ifndef JUCE_USE_FREETYPE
+  #define JUCE_USE_FREETYPE 1
+ #endif
+
+ #ifndef JUCE_USE_FONTCONFIG
+  #define JUCE_USE_FONTCONFIG 0
+ #endif
 #elif JUCE_ANDROID
  #include <android/font_matcher.h>
  #include <android/system_fonts.h>
@@ -308,7 +316,7 @@ JUCE_END_IGNORE_WARNINGS_MSVC
  #include "native/juce_Direct2DImage_windows.cpp"
  #include "native/juce_Direct2DMetrics_windows.cpp"
 
-#elif JUCE_LINUX || JUCE_BSD
+#elif JUCE_LINUX || JUCE_BSD || JUCE_QNX
  #include "native/juce_Fonts_linux.cpp"
  #include "native/juce_IconHelpers_linux.cpp"
 
