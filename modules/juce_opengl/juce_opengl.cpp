@@ -109,6 +109,11 @@
  #include <android/native_window.h>
  #include <android/native_window_jni.h>
  #include <EGL/egl.h>
+
+#elif JUCE_QNX
+ #include <EGL/egl.h>
+ #include <EGL/eglext.h>
+ #include <screen/screen.h>
 #endif
 
 //==============================================================================
@@ -291,6 +296,9 @@ JUCE_IMPL_WGL_EXTENSION_FUNCTION (wglCreateContextAttribsARB)
 
 #elif JUCE_ANDROID
  #include "native/juce_OpenGL_android.h"
+
+#elif JUCE_QNX
+ #include "native/juce_OpenGL_qnx.h"
 
 #endif
 

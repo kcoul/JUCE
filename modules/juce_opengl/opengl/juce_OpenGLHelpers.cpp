@@ -107,7 +107,7 @@ static OpenGLProfile getOpenGLProfile()
    #endif
 }
 
-#if JUCE_ANDROID || JUCE_LINUX || JUCE_BSD
+#if JUCE_ANDROID || JUCE_LINUX || JUCE_BSD || JUCE_QNX
 
 struct EGLHelpers
 {

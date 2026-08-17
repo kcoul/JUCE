@@ -385,7 +385,12 @@ public:
         if (! isFlagSet (stateToUse, StateFlags::pendingRender) && noAutomaticRepaint)
             return RenderStatus::noWork;
 
+       #if JUCE_QNX
+        const auto isUpdating = isFlagSet (stateToUse, StateFlags::paintComponents)
+                             || (context.renderComponents && context.continuousRepaint);
+       #else
         const auto isUpdating = isFlagSet (stateToUse, StateFlags::paintComponents);
+       #endif
 
         if (context.renderComponents && isUpdating)
         {
@@ -489,7 +494,7 @@ public:
             });
 
             const auto newArea = globalArea.withZeroOrigin() * displayScale;
-           #elif JUCE_WINDOWS || JUCE_LINUX || JUCE_BSD
+           #elif JUCE_WINDOWS || JUCE_LINUX || JUCE_BSD || JUCE_QNX
             const auto globalArea = detail::ScalingHelpers::scaledScreenPosToUnscaled (component, logicalArea);
             const auto newArea = (globalArea.toFloat() * peer->getPlatformScaleFactor()).withZeroOrigin().toNearestInt();
            #elif JUCE_IOS || JUCE_ANDROID
@@ -662,9 +667,10 @@ public:
         if (const auto nativeResult = nativeContext->initialiseOnRenderThread (context); nativeResult != InitResult::success)
             return nativeResult;
 
-       #if JUCE_ANDROID
-        // On android the context may be created in initialiseOnRenderThread
-        // and we therefore need to call makeActive again
+       #if JUCE_ANDROID || JUCE_QNX
+        // On Android and QNX the native surface/context may be created in
+        // initialiseOnRenderThread(), so it must be made active again here
+        // before any GL calls are issued.
         context.makeActive();
        #endif
 
