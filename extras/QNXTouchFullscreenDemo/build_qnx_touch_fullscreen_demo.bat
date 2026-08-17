@@ -25,7 +25,18 @@ q++ %COMMON% -c "%ROOT%\modules\juce_core\juce_core_CompilationTime.cpp" -o "%BU
 q++ %COMMON% -c "%ROOT%\modules\juce_events\juce_events.cpp" -o "%BUILD_DIR%\juce_events.o" || exit /b 1
 q++ %COMMON% -c "%ROOT%\modules\juce_graphics\juce_graphics.cpp" -o "%BUILD_DIR%\juce_graphics.o" || exit /b 1
 q++ %COMMON% -c "%ROOT%\modules\juce_graphics\juce_graphics_Harfbuzz.cpp" -o "%BUILD_DIR%\juce_graphics_Harfbuzz.o" || exit /b 1
-qcc -V%TARGET% -DSB_CONFIG_UNITY=1 -I"%ROOT%" -I"%ROOT%\modules" -c "%ROOT%\modules\juce_graphics\unicode\sheenbidi\Source\SheenBidi.c" -o "%BUILD_DIR%\SheenBidi.o" || exit /b 1
+REM JUCE 9 moved the vendored third-party C code (zlib, libpng, libjpg, lunasvg,
+REM SheenBidi) out of the module unity .cpp files and into these per-dependency
+REM .c unity files at each module root. They must each be compiled and linked.
+set CCOMMON=-V%TARGET% -O2 -DJUCE_GLOBAL_MODULE_SETTINGS_INCLUDED=1 -I"%ROOT%" -I"%ROOT%\modules"
+
+qcc %CCOMMON% -c "%ROOT%\modules\juce_graphics\juce_graphics_Sheenbidi.c" -o "%BUILD_DIR%\juce_graphics_Sheenbidi.o" || exit /b 1
+qcc %CCOMMON% -c "%ROOT%\modules\juce_core\juce_core_zlib.c" -o "%BUILD_DIR%\juce_core_zlib.o" || exit /b 1
+qcc %CCOMMON% -c "%ROOT%\modules\juce_graphics\juce_graphics_libpng.c" -o "%BUILD_DIR%\juce_graphics_libpng.o" || exit /b 1
+qcc %CCOMMON% -c "%ROOT%\modules\juce_graphics\juce_graphics_libjpg_1.c" -o "%BUILD_DIR%\juce_graphics_libjpg_1.o" || exit /b 1
+qcc %CCOMMON% -c "%ROOT%\modules\juce_graphics\juce_graphics_libjpg_2.c" -o "%BUILD_DIR%\juce_graphics_libjpg_2.o" || exit /b 1
+qcc %CCOMMON% -c "%ROOT%\modules\juce_graphics\juce_graphics_libjpg_3.c" -o "%BUILD_DIR%\juce_graphics_libjpg_3.o" || exit /b 1
+qcc %CCOMMON% -c "%ROOT%\modules\juce_graphics\juce_graphics_lunasvg.c" -o "%BUILD_DIR%\juce_graphics_lunasvg.o" || exit /b 1
 q++ %COMMON% -c "%ROOT%\modules\juce_data_structures\juce_data_structures.cpp" -o "%BUILD_DIR%\juce_data_structures.o" || exit /b 1
 q++ %COMMON% -c "%ROOT%\modules\juce_gui_basics\juce_gui_basics.cpp" -o "%BUILD_DIR%\juce_gui_basics.o" || exit /b 1
 q++ %COMMON% -c "%ROOT%\modules\juce_gui_basics\juce_gui_basics_2.cpp" -o "%BUILD_DIR%\juce_gui_basics_2.o" || exit /b 1
@@ -44,7 +55,13 @@ q++ -V%TARGET% ^
     "%BUILD_DIR%\juce_events.o" ^
     "%BUILD_DIR%\juce_graphics.o" ^
     "%BUILD_DIR%\juce_graphics_Harfbuzz.o" ^
-    "%BUILD_DIR%\SheenBidi.o" ^
+    "%BUILD_DIR%\juce_graphics_Sheenbidi.o" ^
+    "%BUILD_DIR%\juce_core_zlib.o" ^
+    "%BUILD_DIR%\juce_graphics_libpng.o" ^
+    "%BUILD_DIR%\juce_graphics_libjpg_1.o" ^
+    "%BUILD_DIR%\juce_graphics_libjpg_2.o" ^
+    "%BUILD_DIR%\juce_graphics_libjpg_3.o" ^
+    "%BUILD_DIR%\juce_graphics_lunasvg.o" ^
     "%BUILD_DIR%\juce_data_structures.o" ^
     "%BUILD_DIR%\juce_gui_basics.o" ^
     "%BUILD_DIR%\juce_gui_basics_2.o" ^

@@ -60,14 +60,22 @@ static bool shouldLogQnxOpenGLFps()
 
 class OpenGLContext::NativeContext
 {
+private:
+    using PtrEGLContext = EGLHelpers::PtrEGLContext;
+
 public:
     NativeContext (Component& comp,
                    const OpenGLPixelFormat& pixelFormat,
                    void* contextToShareWithIn,
                    bool useMultisamplingIn,
-                   OpenGLVersion version)
+                   API apiIn,
+                   Version versionIn,
+                   Profile profileIn)
         : component (comp),
-          contextToShareWith (reinterpret_cast<EGLContext> (contextToShareWithIn))
+          contextToShareWith (reinterpret_cast<EGLContext> (contextToShareWithIn)),
+          api (apiIn),
+          version (versionIn),
+          profile (profileIn)
     {
         auto* peer = component.getPeer();
 
@@ -114,7 +122,7 @@ public:
             nativeScreenDisplay = nullptr;
         }
 
-        if (! initEGLDisplay (pixelFormat, useMultisamplingIn, version))
+        if (! initEGLDisplay (pixelFormat, useMultisamplingIn))
             return;
 
         logQnxOpenGL ("Initialised EGL display for native Screen window");
@@ -153,24 +161,17 @@ public:
             return InitResult::fatal;
         }
 
-        std::array<EGLint, 5> contextAttributes
-        {
-            EGL_CONTEXT_CLIENT_VERSION,
-            getContextVersion (versionRequired),
-            EGL_NONE,
-            EGL_NONE,
-            EGL_NONE
-        };
-
-        logQnxOpenGL ("Calling eglCreateContext for window="
+        // Shared with the Linux/Android EGL backends: it handles the API binding,
+        // the ES-version fallback chain and the profile/debug attributes for us.
+        logQnxOpenGL ("Calling EGLHelpers::initEGLContext for window="
                       + String::toHexString ((pointer_sized_int) nativeWindow)
                       + " sharedContext="
                       + String::toHexString ((pointer_sized_int) contextToShareWith));
-        context = eglCreateContext (display, config, contextToShareWith, contextAttributes.data());
+        context = EGLHelpers::initEGLContext (api, version, profile, display, config, contextToShareWith);
 
-        if (context == EGL_NO_CONTEXT)
+        if (context == nullptr)
         {
-            logQnxOpenGL ("eglCreateContext failed, error=0x" + String::toHexString ((int) eglGetError()));
+            logQnxOpenGL ("initEGLContext failed, error=0x" + String::toHexString ((int) eglGetError()));
             destroySurface();
             return InitResult::fatal;
         }
@@ -195,13 +196,13 @@ public:
     {
         const ScopedLock lock (mutex);
 
-        if (surface == EGL_NO_SURFACE || context == EGL_NO_CONTEXT)
+        if (surface == EGL_NO_SURFACE || context == nullptr)
         {
             logQnxOpenGL ("makeActive skipped because surface/context is not ready");
             return false;
         }
 
-        if (eglMakeCurrent (display, surface, surface, context) == EGL_TRUE)
+        if (eglMakeCurrent (display, surface, surface, context.get()) == EGL_TRUE)
             return true;
 
         logQnxOpenGL ("eglMakeCurrent failed, error=0x" + String::toHexString ((int) eglGetError()));
@@ -211,7 +212,7 @@ public:
     bool isActive() const noexcept
     {
         const ScopedLock lock (mutex);
-        return context != EGL_NO_CONTEXT && eglGetCurrentContext() == context;
+        return context != nullptr && eglGetCurrentContext() == context.get();
     }
 
     static void deactivateCurrentContext()
@@ -264,7 +265,7 @@ public:
 
     int getSwapInterval() const                            { return swapInterval; }
     bool createdOk() const noexcept                        { return hasInitialised; }
-    void* getRawContext() const noexcept                   { return context; }
+    void* getRawContext() const noexcept                   { return context.get(); }
     GLuint getFrameBufferID() const noexcept               { return 0; }
 
     struct Locker
@@ -309,17 +310,13 @@ private:
         }
     }
 
-    static int getContextVersion (OpenGLVersion version)
-    {
-        return version == OpenGLVersion::openGL4_3 ? 3 : 2;
-    }
-
     bool tryChooseConfig (const OpenGLPixelFormat& pixelFormat,
                           const std::vector<EGLint>& optionalAttribs)
     {
         std::vector<EGLint> attributes
         {
-            EGL_RENDERABLE_TYPE,    EGL_OPENGL_ES2_BIT | EGL_OPENGL_ES3_BIT,
+            EGL_RENDERABLE_TYPE,    api == OpenGLAPI::openGLES ? (EGL_OPENGL_ES2_BIT | EGL_OPENGL_ES3_BIT)
+                                                               : EGL_OPENGL_BIT,
             EGL_SURFACE_TYPE,       EGL_WINDOW_BIT,
             EGL_RED_SIZE,           pixelFormat.redBits,
             EGL_GREEN_SIZE,         pixelFormat.greenBits,
@@ -338,11 +335,8 @@ private:
     }
 
     bool initEGLDisplay (const OpenGLPixelFormat& pixelFormat,
-                         bool useMultisamplingIn,
-                         OpenGLVersion version)
+                         bool useMultisamplingIn)
     {
-        versionRequired = version;
-
         if (sharedDisplay == EGL_NO_DISPLAY)
         {
             if (! tryInitDisplayWithPlatformScreen())
@@ -361,9 +355,12 @@ private:
             logClientExtensions();
             logDisplayExtensions (sharedDisplay);
 
-            if (eglBindAPI (EGL_OPENGL_ES_API) != EGL_TRUE)
+            const auto eglApi = api == OpenGLAPI::openGL ? EGL_OPENGL_API : EGL_OPENGL_ES_API;
+
+            if (eglBindAPI (eglApi) != EGL_TRUE)
             {
-                logQnxOpenGL ("eglBindAPI(EGL_OPENGL_ES_API) failed, error=0x" + String::toHexString ((int) eglGetError()));
+                logQnxOpenGL ("eglBindAPI(0x" + String::toHexString ((int) eglApi)
+                              + ") failed, error=0x" + String::toHexString ((int) eglGetError()));
                 eglTerminate (sharedDisplay);
                 sharedDisplay = EGL_NO_DISPLAY;
                 return false;
@@ -450,12 +447,11 @@ private:
 
     void destroyContext()
     {
-        if (context != EGL_NO_CONTEXT)
+        if (context != nullptr)
         {
             logQnxOpenGL ("Destroying EGL context for window="
                           + String::toHexString ((pointer_sized_int) nativeWindow));
-            eglDestroyContext (display, context);
-            context = EGL_NO_CONTEXT;
+            context.reset();
         }
     }
 
@@ -464,13 +460,15 @@ private:
     OpenGLContext* juceContext = nullptr;
     EGLDisplay display = EGL_NO_DISPLAY;
     EGLSurface surface = EGL_NO_SURFACE;
-    EGLContext context = EGL_NO_CONTEXT;
+    PtrEGLContext context;
     EGLContext contextToShareWith = EGL_NO_CONTEXT;
     EGLConfig config = nullptr;
     EGLNativeDisplayType nativeDisplay = EGLNativeDisplayType{};
     screen_display_t nativeScreenDisplay = nullptr;
     EGLNativeWindowType nativeWindow = EGLNativeWindowType{};
-    OpenGLVersion versionRequired = OpenGLVersion::defaultGLVersion;
+    API api = API::openGLES;
+    Version version {};
+    Profile profile = Profile::core;
     int swapInterval = 0;
     int swapCount = 0;
     double fpsWindowStartMs = 0.0;      // JUCE_QNX_LOG_FPS accounting
@@ -485,6 +483,11 @@ private:
 bool OpenGLHelpers::isContextActive()
 {
     return eglGetCurrentContext() != EGL_NO_CONTEXT;
+}
+
+bool OpenGLHelpers::isOpenGLES()
+{
+    return eglQueryAPI() == EGL_OPENGL_ES_API;
 }
 
 } // namespace juce

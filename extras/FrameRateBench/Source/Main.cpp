@@ -388,6 +388,16 @@ namespace
             juce::Logger::writeToLog ("BENCH_NOTE OpenGL context created, swapInterval="
                                       + juce::String (interval)
                                       + (applied ? "" : " (NOT SUPPORTED - platform default in use)"));
+
+            // Which context we actually got is part of the result: JUCE 9 lets each
+            // backend negotiate API/version/profile, so two platforms showing the
+            // same fps may not be running the same kind of context.
+            const auto actual = openGLContext.getVersion();
+            juce::Logger::writeToLog ("BENCH_GLCONTEXT api="
+                                      + juce::String (openGLContext.getAPI() == juce::OpenGLAPI::openGLES ? "GLES" : "GL")
+                                      + " version=" + juce::String (actual.major) + "." + juce::String (actual.minor)
+                                      + " profile=" + juce::String (openGLContext.getProfile() == juce::OpenGLProfile::core ? "core" : "compatibility")
+                                      + " glVersion=" + juce::String (reinterpret_cast<const char*> (juce::gl::glGetString (juce::gl::GL_VERSION))));
         }
 
         void renderOpenGL() override

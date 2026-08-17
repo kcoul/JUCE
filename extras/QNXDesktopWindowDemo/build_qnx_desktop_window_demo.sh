@@ -31,7 +31,26 @@ q++ "${COMMON[@]}" -c "$ROOT/modules/juce_core/juce_core_CompilationTime.cpp" -o
 q++ "${COMMON[@]}" -c "$ROOT/modules/juce_events/juce_events.cpp" -o "$BUILD_DIR/juce_events.o"
 q++ "${COMMON[@]}" -c "$ROOT/modules/juce_graphics/juce_graphics.cpp" -o "$BUILD_DIR/juce_graphics.o"
 q++ "${COMMON[@]}" -c "$ROOT/modules/juce_graphics/juce_graphics_Harfbuzz.cpp" -o "$BUILD_DIR/juce_graphics_Harfbuzz.o"
-qcc "-V${TARGET}" -DSB_CONFIG_UNITY=1 -I"$ROOT" -I"$ROOT/modules" -c "$ROOT/modules/juce_graphics/unicode/sheenbidi/Source/SheenBidi.c" -o "$BUILD_DIR/SheenBidi.o"
+# JUCE 9 moved the vendored third-party C code (zlib, libpng, libjpg, lunasvg,
+# SheenBidi) out of the module unity .cpp files and into these per-dependency
+# .c unity files at each module root. They must each be compiled and linked.
+VENDORED_C=(
+  juce_graphics/juce_graphics_Sheenbidi
+  juce_core/juce_core_zlib
+  juce_graphics/juce_graphics_libpng
+  juce_graphics/juce_graphics_libjpg_1
+  juce_graphics/juce_graphics_libjpg_2
+  juce_graphics/juce_graphics_libjpg_3
+  juce_graphics/juce_graphics_lunasvg
+)
+
+VENDORED_OBJ=()
+for v in "${VENDORED_C[@]}"; do
+  obj="$BUILD_DIR/$(basename "$v").o"
+  qcc "-V${TARGET}" -O2 -DJUCE_GLOBAL_MODULE_SETTINGS_INCLUDED=1 -I"$ROOT" -I"$ROOT/modules" \
+      -c "$ROOT/modules/$v.c" -o "$obj"
+  VENDORED_OBJ+=("$obj")
+done
 q++ "${COMMON[@]}" -c "$ROOT/modules/juce_data_structures/juce_data_structures.cpp" -o "$BUILD_DIR/juce_data_structures.o"
 q++ "${COMMON[@]}" -c "$ROOT/modules/juce_gui_basics/juce_gui_basics.cpp" -o "$BUILD_DIR/juce_gui_basics.o"
 q++ "${COMMON[@]}" -c "$ROOT/modules/juce_gui_basics/juce_gui_basics_2.cpp" -o "$BUILD_DIR/juce_gui_basics_2.o"
@@ -46,7 +65,7 @@ q++ "-V${TARGET}" \
   "$BUILD_DIR/juce_events.o" \
   "$BUILD_DIR/juce_graphics.o" \
   "$BUILD_DIR/juce_graphics_Harfbuzz.o" \
-  "$BUILD_DIR/SheenBidi.o" \
+  "${VENDORED_OBJ[@]}" \
   "$BUILD_DIR/juce_data_structures.o" \
   "$BUILD_DIR/juce_gui_basics.o" \
   "$BUILD_DIR/juce_gui_basics_2.o" \
