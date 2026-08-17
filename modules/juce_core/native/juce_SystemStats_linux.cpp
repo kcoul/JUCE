@@ -67,7 +67,11 @@ SystemStats::OperatingSystemType SystemStats::getOperatingSystemType()
 
 String SystemStats::getOperatingSystemName()
 {
+   #if JUCE_QNX
+    return "QNX";
+   #else
     return "Linux";
+   #endif
 }
 
 bool SystemStats::isOperatingSystem64Bit()
@@ -164,6 +168,14 @@ int SystemStats::getMemorySizeInMegabytes()
     auto memorySize = sizeof (memory);
     auto result = sysctl (mib, numElementsInArray (mib), &memory, &memorySize, nullptr, 0);
     return result == 0 ? (int) (memory / (int64) 1e6) : 0;
+   #elif JUCE_QNX
+    const auto pageCount = sysconf (_SC_PHYS_PAGES);
+    const auto pageSize = sysconf (_SC_PAGESIZE);
+
+    if (pageCount > 0 && pageSize > 0)
+        return (int) (((int64) pageCount * (int64) pageSize) / (1024 * 1024));
+
+    return 0;
    #else
     struct sysinfo sysi;
 
@@ -420,6 +432,8 @@ JUCE_API bool JUCE_CALLTYPE juce_isRunningUnderDebugger() noexcept
     auto infoSize = sizeof (info);
     auto result = sysctl (mib, numElementsInArray (mib), &info, &infoSize, nullptr, 0);
     return result == 0 ? ((info.ki_flag & P_TRACED) != 0) : false;
+   #elif JUCE_QNX
+    return false;
    #else
     return readPosixConfigFileValue ("/proc/self/status", "TracerPid").getIntValue() > 0;
    #endif

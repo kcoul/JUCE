@@ -190,7 +190,10 @@ String SystemStats::getStackBacktrace()
 {
     String result;
 
-   #if JUCE_WINDOWS
+   #if JUCE_QNX
+    jassertfalse; // sorry, not implemented yet!
+
+   #elif JUCE_WINDOWS
     HANDLE process = GetCurrentProcess();
     SymInitialize (process, nullptr, TRUE);
 

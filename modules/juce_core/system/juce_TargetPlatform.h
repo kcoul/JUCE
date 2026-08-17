@@ -74,6 +74,8 @@
 #elif defined (JUCE_ANDROID)
   #undef        JUCE_ANDROID
   #define       JUCE_ANDROID 1
+#elif defined (__QNX__) || defined (__QNXNTO__)
+  #define       JUCE_QNX 1
 #elif defined (__FreeBSD__) || defined (__OpenBSD__)
   #define       JUCE_BSD 1
 #elif defined (LINUX) || defined (__linux__)
@@ -180,7 +182,7 @@
 #endif
 
 //==============================================================================
-#if JUCE_LINUX || JUCE_ANDROID || JUCE_BSD
+#if JUCE_LINUX || JUCE_ANDROID || JUCE_BSD || JUCE_QNX
 
   #ifdef _DEBUG
     #define JUCE_DEBUG 1

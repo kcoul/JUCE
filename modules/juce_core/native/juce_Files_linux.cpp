@@ -45,14 +45,21 @@ enum
 
 bool File::isOnCDRomDrive() const
 {
+   #if JUCE_QNX
+    return false;
+   #else
     struct statfs buf;
 
     return statfs (getFullPathName().toUTF8(), &buf) == 0
              && buf.f_type == (unsigned int) U_ISOFS_SUPER_MAGIC;
+   #endif
 }
 
 bool File::isOnHardDisk() const
 {
+   #if JUCE_QNX
+    return true;
+   #else
     struct statfs buf;
 
     if (statfs (getFullPathName().toUTF8(), &buf) == 0)
@@ -71,6 +78,7 @@ bool File::isOnHardDisk() const
 
     // Assume so if this fails for some reason
     return true;
+   #endif
 }
 
 bool File::isOnRemovableDrive() const
@@ -160,7 +168,7 @@ File File::getSpecialLocation (const SpecialLocationType type)
 
         case hostApplicationPath:
         {
-           #if JUCE_BSD
+           #if JUCE_BSD || JUCE_QNX
             return juce_getExecutableFile();
            #else
             const File f ("/proc/self/exe");
