@@ -630,7 +630,13 @@ public:
         if (outputDevice != nullptr && JUCE_ALSA_FAILED (snd_pcm_prepare (outputDevice->handle)))
             return;
 
-        startThread (Priority::high);
+        const auto threadStarted = startThread (Priority::high);
+
+        if (! threadStarted)
+        {
+            error = "failed to start ALSA thread";
+            return;
+        }
 
         int count = 1000;
 
