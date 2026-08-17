@@ -1076,6 +1076,57 @@ private:
     bool hasScanned = false;
     const bool listOnlySoundcards;
 
+   #if JUCE_QNX
+    static bool shouldKeepEnumeratedPCMDevice (const String& id)
+    {
+        return id.isNotEmpty()
+            && ! id.startsWith ("default:")
+            && ! id.startsWith ("sysdefault:")
+            && id != "null";
+    }
+
+    static int findPreferredQnxDeviceIndex (const StringArray& ids)
+    {
+        for (int i = 0; i < ids.size(); ++i)
+            if (ids[i].startsWithIgnoreCase ("plughw:") && ids[i].containsIgnoreCase ("CARD=USB"))
+                return i;
+
+        for (int i = 0; i < ids.size(); ++i)
+            if (ids[i].startsWithIgnoreCase ("plughw:"))
+                return i;
+
+        return ids.indexOf ("default");
+    }
+
+    static String getQnxDisplayNameForPCMDevice (const String& id, const String& description)
+    {
+        const auto flattenedDescription = description.replace ("\n", "; ").trim();
+
+        if (flattenedDescription.isEmpty())
+            return id;
+
+        return flattenedDescription + " [" + id + "]";
+    }
+
+    static void moveEntryToFront (StringArray& names, StringArray& ids, int index)
+    {
+        if (isPositiveAndBelow (index, ids.size()))
+        {
+            ids.move (index, 0);
+            names.move (index, 0);
+        }
+    }
+   #else
+    static bool shouldKeepEnumeratedPCMDevice (const String& id)
+    {
+        return id.isNotEmpty()
+            && ! id.startsWith ("default:")
+            && ! id.startsWith ("sysdefault:")
+            && ! id.startsWith ("plughw:")
+            && id != "null";
+    }
+   #endif
+
     bool testDevice (const String& id, const String& outputName, const String& inputName)
     {
         unsigned int minChansOut = 0, maxChansOut = 0;
@@ -1223,15 +1274,14 @@ private:
 
                 JUCE_ALSA_LOG ("ID: " << id << "; desc: " << description << "; ioid: " << ioid);
 
-                String ss = id.fromFirstOccurrenceOf ("=", false, false)
-                              .upToFirstOccurrenceOf (",", false, false);
-
-                if (id.isEmpty()
-                     || id.startsWith ("default:") || id.startsWith ("sysdefault:")
-                     || id.startsWith ("plughw:") || id == "null")
+                if (! shouldKeepEnumeratedPCMDevice (id))
                     continue;
 
+               #if JUCE_QNX
+                String name (getQnxDisplayNameForPCMDevice (id, description));
+               #else
                 String name (description.replace ("\n", "; "));
+               #endif
 
                 if (name.isEmpty())
                     name = id;
@@ -1268,7 +1318,11 @@ private:
         if (! outputIds.contains ("pulse"))
             testDevice ("pulse", "Pulseaudio output", "Pulseaudio input");
 
-        // make sure the default device is listed first, and followed by the pulse device (if present)
+        // make sure the preferred device is listed first, and followed by the pulse/default devices where relevant
+       #if JUCE_QNX
+        moveEntryToFront (outputNames, outputIds, findPreferredQnxDeviceIndex (outputIds));
+        moveEntryToFront (inputNames, inputIds, findPreferredQnxDeviceIndex (inputIds));
+       #else
         auto idx = outputIds.indexOf ("pulse");
         outputIds.move (idx, 0);
         outputNames.move (idx, 0);
@@ -1284,6 +1338,7 @@ private:
         idx = inputIds.indexOf ("default");
         inputIds.move (idx, 0);
         inputNames.move (idx, 0);
+       #endif
     }
 
     static String hintToString (const void* hints, const char* type)

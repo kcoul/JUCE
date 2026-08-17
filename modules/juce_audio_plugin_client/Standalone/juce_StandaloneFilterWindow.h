@@ -310,7 +310,12 @@ public:
         o.dialogTitle                   = TRANS ("Audio/MIDI Settings");
         o.dialogBackgroundColour        = o.content->getLookAndFeel().findColour (ResizableWindow::backgroundColourId);
         o.escapeKeyTriggersCloseButton  = true;
+       #if JUCE_QNX
+        // QNX Screen has no window manager decorations to draw a native title bar with.
+        o.useNativeTitleBar             = false;
+       #else
         o.useNativeTitleBar             = true;
+       #endif
         o.resizable                     = false;
 
         o.launchAsync();

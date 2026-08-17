@@ -147,7 +147,7 @@
  #endif
 
 //==============================================================================
-#elif JUCE_LINUX || JUCE_BSD
+#elif JUCE_LINUX || JUCE_BSD || JUCE_QNX
  #if JUCE_ALSA
   /* Got an include error here? If so, you've either not got ALSA installed, or you've
      not got your paths set up correctly to find its header files.
@@ -217,7 +217,7 @@ namespace juce
 
 #endif
 
-#if (JUCE_LINUX || JUCE_BSD || JUCE_MAC || JUCE_WINDOWS) && JUCE_JACK
+#if (JUCE_LINUX || JUCE_BSD || JUCE_QNX || JUCE_MAC || JUCE_WINDOWS) && JUCE_JACK
  /* Got an include error here? If so, you've either not got jack-audio-connection-kit
     installed, or you've not got your paths set up correctly to find its header files.
 
@@ -256,6 +256,14 @@ namespace juce
 
 #if JUCE_LINUX || JUCE_BSD
  #include "native/juce_Midi_linux.cpp"
+#elif JUCE_QNX
+ namespace juce::universal_midi_packets
+ {
+     auto Endpoints::Impl::Native::make (EndpointsListener&) -> std::unique_ptr<Native>
+     {
+         return nullptr;
+     }
+ }
 #elif JUCE_ANDROID
  #include "native/juce_Midi_android.cpp"
 #elif JUCE_MAC || JUCE_IOS
