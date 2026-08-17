@@ -138,8 +138,8 @@ struct Conversion
 
             const auto extraByte = ((((firstByte & std::byte { 0xf0 }) == std::byte { 0xf0 }) ? std::byte { 0x1 } : std::byte { 0x2 }) << 0x4);
             const std::byte group { (uint8_t) (groupBytes.group & 0xf) };
-            const uint32_t packet[] { mask & Utils::bytesToWord (extraByte | group, data[0], data[1], data[2]), 0, 0, 0 };
-            callback (View (packet));
+            const std::array<uint32_t, 4> packet { mask & Utils::bytesToWord (extraByte | group, data[0], data[1], data[2]), 0u, 0u, 0u };
+            callback (View (packet.data()));
             return;
         }
 
