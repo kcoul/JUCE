@@ -198,6 +198,19 @@ namespace
         return enabled;
     }
 
+    // Move the pixel copy + screen_post_window off the render thread. The X11
+    // backend gets this for free: XShmPutImage hands the buffer to the X server
+    // and returns in ~0.01ms, so the server's blit overlaps the client's next
+    // frame. QNX has no server to hand off to, so we overlap it ourselves.
+    // Measured on RPi4: present costs 13.7ms on the render thread, against a
+    // render of 14.5-116ms, so hiding it recovers nearly all of that.
+    // On by default; JUCE_QNX_THREADED_PRESENT=0 presents on the render thread.
+    bool shouldUseThreadedQnxPresent()
+    {
+        static const bool enabled = SystemStats::getEnvironmentVariable ("JUCE_QNX_THREADED_PRESENT", "1") != "0";
+        return enabled;
+    }
+
     // Emit a once-per-second "QNX_PRESENT_FPS ..." line from the present path so
     // any JUCE app (incl. SurgeXT) reports achieved present rate with no app code.
     bool shouldLogQnxPresentFps()
@@ -1057,6 +1070,10 @@ namespace
 
         ~QnxComponentPeer() override
         {
+            // Before anything else: the present thread touches the native window
+            // and the backing images, so it must be joined while both still exist.
+            stopPresentThread();
+
             currentTouches.deleteAllTouchesForPeer (this);
             activeTouchContacts.clear();
             peerState->peer = nullptr;
@@ -1248,13 +1265,25 @@ namespace
                 return;
             }
 
-            auto& target = backingImage;
+            const bool threaded = shouldUseThreadedQnxPresent() && startPresentThreadIfNeeded();
+
+            // Threaded present needs two buffers so frame N+1 can be rendered while
+            // frame N is still being copied out; the single-buffer path keeps using
+            // index 0 so both modes share one code path below.
+            if (! threaded)
+                backingIndex = 0;
+
+            auto& target = backingImages[backingIndex];
 
             // Reuse the backing image across frames; only (re)allocate on resize.
             if (! target.isValid()
                 || target.getWidth()  != fullBounds.getWidth()
                 || target.getHeight() != fullBounds.getHeight())
             {
+                // A resize invalidates whatever the presenter may still be reading.
+                if (threaded)
+                    presentThread->presentDone.wait();
+
                 target = Image (Image::ARGB, fullBounds.getWidth(), fullBounds.getHeight(), true);
                 dirty = fullBounds; // fresh buffer: everything is dirty once
             }
@@ -1278,11 +1307,33 @@ namespace
 
             const auto presentStartMs = Time::getMillisecondCounterHiRes();
 
-            presentStartStampMs = presentStartMs;
-            presentRegion (target, dirty);
+            if (threaded)
+            {
+                // Wait only for the PREVIOUS frame to finish presenting, then hand
+                // this one over and return. The copy then overlaps the next render,
+                // which is what makes the cost disappear from the frame time.
+                presentThread->presentDone.wait();
+                presentThread->presentDone.reset();
 
-            noteFrameTimings (presentStartMs - renderStartMs,
-                              Time::getMillisecondCounterHiRes() - presentStartMs);
+                presentThread->job = target;
+                presentThread->jobDirty = dirty;
+                presentThread->frameReady.signal();
+
+                backingIndex ^= 1;
+
+                // Present no longer costs the render thread anything, which is
+                // exactly what the X11 backend reports (presentMs=0.01).
+                noteFrameTimings (presentStartMs - renderStartMs,
+                                  Time::getMillisecondCounterHiRes() - presentStartMs);
+            }
+            else
+            {
+                presentStartStampMs = presentStartMs;
+                presentRegion (target, dirty);
+
+                noteFrameTimings (presentStartMs - renderStartMs,
+                                  Time::getMillisecondCounterHiRes() - presentStartMs);
+            }
 
             pendingRepaintArea = {};
         }
@@ -2052,8 +2103,33 @@ namespace
             return true;
         }
 
+        bool startPresentThreadIfNeeded()
+        {
+            if (presentThread == nullptr)
+            {
+                presentThread = std::make_unique<PresentThread> (*this);
+                presentThread->startThread (Thread::Priority::high);
+                logQnxWindowing ("Started threaded present");
+            }
+
+            return presentThread->isThreadRunning();
+        }
+
+        void stopPresentThread()
+        {
+            if (presentThread != nullptr)
+            {
+                logQnxWindowing ("Stopping threaded present");
+                presentThread.reset();      // dtor drains and joins
+            }
+        }
+
         void destroyWindowBuffers()
         {
+            // The presenter writes into these buffers; it must be idle before the
+            // window they target goes away.
+            stopPresentThread();
+
             if (windowBuffersCreated && nativeWindow != nullptr)
             {
                 logQnxWindowing ("Destroying Screen window buffers");
@@ -2334,7 +2410,59 @@ namespace
         Rectangle<int> bounds { component.getBounds().isEmpty() ? Rectangle<int> (0, 0, 1, 1)
                                                                  : component.getBounds() };
         Rectangle<int> pendingRepaintArea;
-        Image backingImage;
+        // Presents frames handed over by the render thread. Owns nothing: the
+        // handshake below guarantees the render thread is not touching the image
+        // it is given, and that the window outlives the thread.
+        class PresentThread final : public Thread
+        {
+        public:
+            explicit PresentThread (QnxComponentPeer& p)
+                : Thread ("JUCE QNX Present"), owner (p)
+            {
+                presentDone.signal();   // idle to begin with
+            }
+
+            ~PresentThread() override
+            {
+                signalThreadShouldExit();
+                frameReady.signal();
+                stopThread (2000);
+            }
+
+            void run() override
+            {
+                while (! threadShouldExit())
+                {
+                    if (! frameReady.wait (200))
+                        continue;
+
+                    if (threadShouldExit())
+                        break;
+
+                    if (job.isValid())
+                        owner.presentRegion (job, jobDirty);
+
+                    // Release before signalling: the render thread may reuse this
+                    // buffer immediately, and a second reference would make JUCE
+                    // deep-copy the image on the next write.
+                    job = Image();
+                    presentDone.signal();
+                }
+
+                job = Image();
+                presentDone.signal();
+            }
+
+            Image job;
+            Rectangle<int> jobDirty;
+            WaitableEvent frameReady;
+            WaitableEvent presentDone { true };   // manual reset
+            QnxComponentPeer& owner;
+        };
+
+        std::unique_ptr<PresentThread> presentThread;
+        Image backingImages[2];             // double-buffered for threaded present
+        int backingIndex = 0;
         double fpsWindowStartMs = 0.0;      // JUCE_QNX_LOG_FPS accounting
         int fpsWindowFrames = 0;
         double fpsWindowRenderMs = 0.0;     // rasterisation time this window
