@@ -37,7 +37,7 @@ namespace juce
 
 void MACAddress::findAllAddresses (Array<MACAddress>& result)
 {
-   #if JUCE_BSD
+   #if JUCE_BSD || JUCE_QNX
     struct ifaddrs* addrs = nullptr;
 
     if (getifaddrs (&addrs) != -1)

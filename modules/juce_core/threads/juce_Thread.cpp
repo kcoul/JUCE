@@ -144,7 +144,7 @@ bool Thread::startThreadInternal (Priority threadPriority)
     // has any options but we need to set this here to satisfy
     // later queries, otherwise we get inconsistent results across
     // platforms.
-   #if JUCE_ANDROID || JUCE_LINUX || JUCE_BSD
+   #if JUCE_ANDROID || JUCE_LINUX || JUCE_BSD || JUCE_QNX
     priority = threadPriority;
    #endif
 

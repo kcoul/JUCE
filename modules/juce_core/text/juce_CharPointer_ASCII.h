@@ -333,7 +333,7 @@ public:
     /** Parses this string as a 64-bit integer. */
     int64 getIntValue64() const noexcept
     {
-       #if JUCE_LINUX || JUCE_BSD || JUCE_ANDROID
+       #if JUCE_LINUX || JUCE_BSD || JUCE_QNX || JUCE_ANDROID
         return atoll (data);
        #elif JUCE_WINDOWS
         return _atoi64 (data);

@@ -68,7 +68,7 @@ void JUCE_CALLTYPE Process::terminate()
 }
 
 
-#if JUCE_MAC || JUCE_LINUX || JUCE_BSD
+#if JUCE_MAC || JUCE_LINUX || JUCE_BSD || JUCE_QNX
 bool Process::setMaxNumberOfFileHandles (int newMaxNumber) noexcept
 {
     rlimit lim;
@@ -163,10 +163,12 @@ inline int juce_siginterrupt ([[maybe_unused]] int sig, [[maybe_unused]] int fla
     struct ::sigaction act;
     (void) ::sigaction (sig, nullptr, &act);
 
+   #if defined (SA_RESTART)
     if (flag != 0)
         act.sa_flags &= static_cast<juce_sigactionflags_type> (~SA_RESTART);
     else
         act.sa_flags |= static_cast<juce_sigactionflags_type> (SA_RESTART);
+   #endif
 
     return ::sigaction (sig, &act, nullptr);
    #endif
@@ -191,7 +193,13 @@ namespace
 
    #if ! JUCE_WASM
     // if this file doesn't exist, find a parent of it that does
-    bool juce_doStatFS (File f, struct statfs& result)
+   #if JUCE_QNX
+    using juce_statfsStruct = struct statvfs;
+   #else
+    using juce_statfsStruct = struct statfs;
+   #endif
+
+    bool juce_doStatFS (File f, juce_statfsStruct& result)
     {
         for (int i = 5; --i >= 0;)
         {
@@ -201,7 +209,11 @@ namespace
             f = f.getParentDirectory();
         }
 
+       #if JUCE_QNX
+        return statvfs (f.getFullPathName().toUTF8(), &result) == 0;
+       #else
         return statfs (f.getFullPathName().toUTF8(), &result) == 0;
+       #endif
     }
 
    #if JUCE_MAC || JUCE_IOS
@@ -273,7 +285,7 @@ uint64 File::getFileIdentifier() const
 
 static bool hasEffectiveRootFilePermissions()
 {
-   #if JUCE_LINUX || JUCE_BSD
+   #if JUCE_LINUX || JUCE_BSD || JUCE_QNX
     return geteuid() == 0;
    #else
     return false;
@@ -592,7 +604,9 @@ void MemoryMappedFile::openInternal (const File& file, AccessMode mode, bool exc
         if (m != MAP_FAILED)
         {
             address = m;
+           #if defined (MADV_SEQUENTIAL)
             madvise (m, (size_t) range.getLength(), MADV_SEQUENTIAL);
+           #endif
         }
         else
         {
@@ -636,7 +650,7 @@ File juce_getExecutableFile()
 //==============================================================================
 int64 File::getBytesFreeOnVolume() const
 {
-    struct statfs buf;
+    juce_statfsStruct buf;
 
     if (juce_doStatFS (*this, buf))
         return (int64) buf.f_bsize * (int64) buf.f_bavail; // Note: this returns space available to non-super user
@@ -646,7 +660,7 @@ int64 File::getBytesFreeOnVolume() const
 
 int64 File::getVolumeTotalSize() const
 {
-    struct statfs buf;
+    juce_statfsStruct buf;
 
     if (juce_doStatFS (*this, buf))
         return (int64) buf.f_bsize * (int64) buf.f_blocks;
@@ -933,7 +947,7 @@ public:
             return 0;
         }();
 
-        #if JUCE_MAC || JUCE_IOS || JUCE_BSD
+        #if JUCE_MAC || JUCE_IOS || JUCE_BSD || JUCE_QNX
          const auto scheduler = SCHED_OTHER;
         #elif JUCE_LINUX
          const auto backgroundSched = prio == Thread::Priority::background ? SCHED_IDLE
@@ -979,7 +993,12 @@ static void* makeThreadHandle (PosixThreadAttribute& attr, void* userData, void*
         return nullptr;
 
     pthread_detach (handle);
+
+   #if JUCE_QNX
+    return reinterpret_cast<void*> ((pointer_sized_int) handle);
+   #else
     return (void*) handle;
+   #endif
 }
 
 void Thread::closeThreadHandle()
@@ -995,8 +1014,9 @@ void JUCE_CALLTYPE Thread::setCurrentThreadName (const String& name)
     {
         [[NSThread currentThread] setName: juceStringToNS (name)];
     }
-   #elif JUCE_LINUX || JUCE_BSD || JUCE_ANDROID
+   #elif JUCE_LINUX || JUCE_BSD || JUCE_QNX || JUCE_ANDROID
     #if (JUCE_BSD \
+          || JUCE_QNX \
           || (JUCE_LINUX && (__GLIBC__ * 1000 + __GLIBC_MINOR__) >= 2012) \
           || (JUCE_ANDROID && __ANDROID_API__ >= 9))
      pthread_setname_np (pthread_self(), name.toRawUTF8());
@@ -1008,7 +1028,11 @@ void JUCE_CALLTYPE Thread::setCurrentThreadName (const String& name)
 
 Thread::ThreadID JUCE_CALLTYPE Thread::getCurrentThreadId()
 {
+   #if JUCE_QNX
+    return reinterpret_cast<ThreadID> ((pointer_sized_int) pthread_self());
+   #else
     return (ThreadID) pthread_self();
+   #endif
 }
 
 void JUCE_CALLTYPE Thread::yield()
@@ -1087,7 +1111,7 @@ void* DynamicLibrary::getFunction (const String& functionName) noexcept
 }
 
 //==============================================================================
-#if JUCE_LINUX || JUCE_ANDROID
+#if JUCE_LINUX || JUCE_QNX || JUCE_ANDROID
 static String readPosixConfigFileValue (const char* file, const char* key)
 {
     StringArray lines;
