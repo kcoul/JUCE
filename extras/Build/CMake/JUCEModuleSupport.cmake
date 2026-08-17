@@ -64,6 +64,7 @@ endfunction()
 
 if((CMAKE_SYSTEM_NAME STREQUAL "Windows")
    OR (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+   OR (CMAKE_SYSTEM_NAME STREQUAL "QNX")
    OR (CMAKE_SYSTEM_NAME MATCHES ".*BSD"))
     # If you really need to override the detected arch for some reason,
     # you can configure the build with -DJUCE_TARGET_ARCHITECTURE=<custom arch>
@@ -193,6 +194,7 @@ function(_juce_should_build_module_source filename output_var)
         "linux\;Linux|.*BSD"
         "mac\;Darwin"
         "osx\;Darwin"
+        "qnx\;QNX"
         "windows\;Windows")
 
     set(result TRUE)
@@ -411,7 +413,7 @@ function(_juce_add_module_staticlib_paths module_target module_path)
         _juce_add_library_path(${module_target} "${module_path}/libs/MacOSX")
     elseif(CMAKE_SYSTEM_NAME STREQUAL "iOS")
         _juce_add_library_path(${module_target} "${module_path}/libs/iOS")
-    elseif((CMAKE_SYSTEM_NAME STREQUAL "Linux") OR (CMAKE_SYSTEM_NAME MATCHES ".*BSD"))
+    elseif((CMAKE_SYSTEM_NAME STREQUAL "Linux") OR (CMAKE_SYSTEM_NAME STREQUAL "QNX") OR (CMAKE_SYSTEM_NAME MATCHES ".*BSD"))
         _juce_add_library_path(${module_target} "${module_path}/libs/Linux/${JUCE_TARGET_ARCHITECTURE}")
     elseif(CMAKE_SYSTEM_NAME STREQUAL "Windows")
         if(CMAKE_GENERATOR MATCHES "Visual Studio [0-9]+ (20[0-9]+)")
@@ -555,7 +557,7 @@ function(juce_add_module module_path)
 
     target_compile_definitions(${module_name} INTERFACE JUCE_MODULE_AVAILABLE_${module_name}=1)
 
-    if((CMAKE_SYSTEM_NAME STREQUAL "Linux") OR (CMAKE_SYSTEM_NAME MATCHES ".*BSD"))
+    if((CMAKE_SYSTEM_NAME STREQUAL "Linux") OR (CMAKE_SYSTEM_NAME STREQUAL "QNX") OR (CMAKE_SYSTEM_NAME MATCHES ".*BSD"))
         target_compile_definitions(${module_name} INTERFACE LINUX=1)
     endif()
 
