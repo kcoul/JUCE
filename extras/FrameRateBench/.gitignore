@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+
+# Result logs pulled back from targets (--pull-log lands them in the CWD).
+FrameRateBench-*.log
