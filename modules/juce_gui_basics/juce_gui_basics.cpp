@@ -239,6 +239,10 @@
 
  #include "native/juce_FileChooser_linux.cpp"
 
+#elif JUCE_QNX
+ #include "native/juce_WindowUtils_linux.cpp"
+ #include "native/juce_Windowing_qnx.cpp"
+
 #elif JUCE_ANDROID
 
  #include "juce_core/files/juce_common_MimeTypes.h"
