@@ -183,7 +183,7 @@ namespace juce
     class Grid;
     class FocusOutline;
 
-   #if JUCE_MAC || JUCE_WINDOWS || JUCE_LINUX || JUCE_BSD
+   #if JUCE_MAC || JUCE_WINDOWS || JUCE_LINUX || JUCE_BSD || JUCE_QNX
     Image createSnapshotOfNativeWindow (void* nativeWindowHandle);
    #endif
 
