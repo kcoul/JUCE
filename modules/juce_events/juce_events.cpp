@@ -61,7 +61,7 @@
  #import <IOKit/hid/IOHIDKeys.h>
  #import <IOKit/pwr_mgt/IOPMLib.h>
 
-#elif JUCE_LINUX || JUCE_BSD
+#elif JUCE_LINUX || JUCE_BSD || JUCE_QNX
  #include <unistd.h>
 #elif JUCE_WINDOWS
  #include <shellscalingapi.h>
@@ -108,7 +108,7 @@
   #include "native/juce_WinRTWrapper_windows.cpp"
  #endif
 
-#elif JUCE_LINUX || JUCE_BSD
+#elif JUCE_LINUX || JUCE_BSD || JUCE_QNX
  #include "native/juce_EventLoopInternal_linux.h"
  #include "native/juce_Messaging_linux.cpp"
 
