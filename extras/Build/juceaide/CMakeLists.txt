@@ -35,7 +35,21 @@
 # simulator if we're targeting iOS or Android, we reinvoke cmake here and build juceaide during the
 # configuration stage of the outer project.
 
-if(JUCE_BUILD_HELPER_TOOLS)
+# Allow a prebuilt juceaide to be supplied instead of bootstrapping one. When cross
+# compiling, the bootstrap reinvokes CMake with the cross toolchain still in scope and
+# cannot produce a host binary, so a host build must be pointed at explicitly.
+if(DEFINED JUCE_JUCEAIDE_PATH)
+    if(NOT EXISTS "${JUCE_JUCEAIDE_PATH}")
+        message(FATAL_ERROR "JUCE_JUCEAIDE_PATH points to a missing file: ${JUCE_JUCEAIDE_PATH}")
+    endif()
+
+    add_executable(juceaide IMPORTED GLOBAL)
+    set_target_properties(juceaide PROPERTIES IMPORTED_LOCATION "${JUCE_JUCEAIDE_PATH}")
+    add_executable(juce::juceaide ALIAS juceaide)
+
+    get_filename_component(binary_name "${JUCE_JUCEAIDE_PATH}" NAME)
+    set(JUCE_JUCEAIDE_NAME "${binary_name}" CACHE INTERNAL "The name of the juceaide program")
+elseif(JUCE_BUILD_HELPER_TOOLS)
     # Build the tool for the current system
     juce_add_console_app(juceaide _NO_RESOURCERC
         NEEDS_CURL FALSE)
