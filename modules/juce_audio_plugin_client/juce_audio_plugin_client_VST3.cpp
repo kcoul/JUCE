@@ -1997,7 +1997,7 @@ private:
 
             const auto [desktopFlags, windowsMultiTouch] = detail::PluginUtilities::getDesktopFlagsAndWindowsMultiTouchMode (component->pluginEditor.get());
 
-           #if JUCE_WINDOWS || JUCE_LINUX || JUCE_BSD
+           #if JUCE_WINDOWS || JUCE_LINUX || JUCE_BSD || JUCE_QNX
             component->setOpaque (true);
             component->addToDesktop (desktopFlags, systemWindow);
 
