@@ -230,7 +230,7 @@ namespace Steinberg
     DEF_CLASS_IID (IPlugFrame)
     DEF_CLASS_IID (IPlugViewContentScaleSupport)
 
-   #if JUCE_LINUX || JUCE_BSD
+   #if JUCE_LINUX || JUCE_BSD || JUCE_QNX
     DEF_CLASS_IID (Linux::IRunLoop)
     DEF_CLASS_IID (Linux::IEventHandler)
    #endif
