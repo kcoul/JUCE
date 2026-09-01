@@ -36,7 +36,7 @@
 
 #if JUCE_INTERNAL_HAS_VST3
 
-#if (JUCE_LINUX || JUCE_BSD)
+#if (JUCE_LINUX || JUCE_BSD || JUCE_QNX)
  #include <sys/utsname.h>
 #endif
 
@@ -406,7 +406,7 @@ static void toProcessContext (Vst::ProcessContext& context,
 }
 
 //==============================================================================
-#if JUCE_LINUX || JUCE_BSD
+#if JUCE_LINUX || JUCE_BSD || JUCE_QNX
 
 class RunLoop  : public Linux::IRunLoop
 {
@@ -678,7 +678,7 @@ struct VST3HostContextHeadless : public Vst::IComponentHandler,
                                 UniqueBase<Vst::IContextMenuTarget>{},
                                 UniqueBase<Vst::IHostApplication>{},
                                 UniqueBase<Vst::IUnitHandler>{},
-                               #if JUCE_LINUX || JUCE_BSD
+                               #if JUCE_LINUX || JUCE_BSD || JUCE_QNX
                                 UniqueBase<Linux::IRunLoop>{},
                                #endif
                                 SharedBase<FUnknown, Vst::IComponentHandler>{}).extract (obj);
@@ -1085,7 +1085,7 @@ struct DLLHandle
             if (auto* exitFn = (ExitModuleFn) getFunction (exitFnName))
                 exitFn();
 
-           #if JUCE_WINDOWS || JUCE_LINUX || JUCE_BSD
+           #if JUCE_WINDOWS || JUCE_LINUX || JUCE_BSD || JUCE_QNX
             library.close();
            #endif
         }
@@ -1107,7 +1107,7 @@ struct DLLHandle
 
     void* getFunction (const char* functionName)
     {
-       #if JUCE_WINDOWS || JUCE_LINUX || JUCE_BSD
+       #if JUCE_WINDOWS || JUCE_LINUX || JUCE_BSD || JUCE_QNX
         return library.getFunction (functionName);
        #elif JUCE_MAC
         if (bundleRef == nullptr)
@@ -1131,7 +1131,7 @@ private:
     static constexpr const char* exitFnName  = "ExitDll";
 
     using EntryProc = bool (PLUGIN_API*)();
-   #elif JUCE_LINUX || JUCE_BSD
+   #elif JUCE_LINUX || JUCE_BSD || JUCE_QNX
     static constexpr const char* entryFnName = "ModuleEntry";
     static constexpr const char* exitFnName  = "ModuleExit";
 
@@ -1144,7 +1144,7 @@ private:
    #endif
 
     //==============================================================================
-   #if JUCE_WINDOWS || JUCE_LINUX || JUCE_BSD
+   #if JUCE_WINDOWS || JUCE_LINUX || JUCE_BSD || JUCE_QNX
     DynamicLibrary library;
 
     bool open()
@@ -1256,7 +1256,7 @@ private:
 
     static File getDLLFileFromBundle (const String& bundlePath)
     {
-       #if JUCE_LINUX || JUCE_BSD
+       #if JUCE_LINUX || JUCE_BSD || JUCE_QNX
         const auto machineName = []() -> String
         {
             struct utsname unameData;
