@@ -45,7 +45,14 @@
 
 #if SMTG_OS_LINUX
 #if !defined (SMTG_USE_STDATOMIC_H)
-#if defined (__ANDROID__) || defined(_LIBCPP_VERSION)
+#if defined (__QNXNTO__)
+// QNX uses libc++, so it matches the _LIBCPP_VERSION test below and would take
+// the <stdatomic.h> path - but the C11 names it needs are not visible in C++
+// mode there. The other branch is no better: <ext/atomicity.h> and
+// __gnu_cxx::__atomic_add are libstdc++ only. Take neither, and use the GCC
+// builtin in atomicAdd instead.
+#define SMTG_USE_STDATOMIC_H 0
+#elif defined (__ANDROID__) || defined(_LIBCPP_VERSION)
 #define SMTG_USE_STDATOMIC_H 1
 #else
 #include <ext/atomicity.h>
@@ -99,6 +106,10 @@ int32 PLUGIN_API atomicAdd (int32& var, int32 d)
 	return OSAtomicAdd32Barrier (d, (int32_t*)&var);
 #elif defined(__ANDROID__)
 	return atomic_fetch_add ((atomic_int*)&var, d) + d;
+#elif defined (__QNXNTO__)
+	// q++ is GCC, so the builtin is available and returns the new value,
+	// which is what this function is specified to return.
+	return __atomic_add_fetch (&var, d, __ATOMIC_SEQ_CST);
 #elif SMTG_OS_LINUX
 	__gnu_cxx::__atomic_add (&var, d);
 	return var;
