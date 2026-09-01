@@ -126,7 +126,12 @@
 //-----------------------------------------------------------------------------
 // LINUX
 //-----------------------------------------------------------------------------
-#elif (defined (__gnu_linux__) && __gnu_linux__) || (defined (__linux__) && __linux__)
+// QNX Neutrino is POSIX and uses the same GCC toolchain conventions as the Linux
+// branch below, so it shares it rather than duplicating sixty lines. SMTG_OS_LINUX
+// is set for QNX as well because the SDK uses it to mean "POSIX, not Apple, not
+// Windows" at its branch points, and leaving it 0 would route QNX down no path at
+// all. The only genuine divergence is <endian.h>, handled below.
+#elif (defined (__gnu_linux__) && __gnu_linux__) || (defined (__linux__) && __linux__) || defined (__QNXNTO__)
 	#define SMTG_OS_LINUX		1
 	#define SMTG_OS_MACOS		0
 	#define SMTG_OS_WINDOWS		0
@@ -148,11 +153,21 @@
 	#endif
 	#define SMTG_CPU_ARM_64EC 0
 
-	#include <endian.h>
-	#if __BYTE_ORDER == __LITTLE_ENDIAN
-		#define BYTEORDER kLittleEndian
+	#if defined (__QNXNTO__)
+		// QNX ships no <endian.h>. Use the compiler's own byte order macros,
+		// which q++ defines like any other GCC.
+		#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+			#define BYTEORDER kLittleEndian
+		#else
+			#define BYTEORDER kBigEndian
+		#endif
 	#else
-		#define BYTEORDER kBigEndian
+		#include <endian.h>
+		#if __BYTE_ORDER == __LITTLE_ENDIAN
+			#define BYTEORDER kLittleEndian
+		#else
+			#define BYTEORDER kBigEndian
+		#endif
 	#endif
 
 	#define COM_COMPATIBLE	0
