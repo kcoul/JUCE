@@ -1256,7 +1256,36 @@ private:
 
     static File getDLLFileFromBundle (const String& bundlePath)
     {
-       #if JUCE_LINUX || JUCE_BSD || JUCE_QNX
+       #if JUCE_QNX
+        // QNX's uname().machine reports the board - "RaspberryPi5" - not the
+        // architecture, so building the bundle path from it would make every
+        // bundle board-specific and unusable on any other QNX target. Use the
+        // architecture the binary was actually compiled for.
+        const String machineName =
+           #if defined (__aarch64__)
+            "aarch64";
+           #elif defined (__x86_64__)
+            "x86_64";
+           #else
+            "unknown";
+           #endif
+
+        const File file { bundlePath };
+        const auto soName = file.getFileNameWithoutExtension() + ".so";
+        const auto contents = file.getChildFile ("Contents");
+
+        // Prefer the QNX-native layout, but accept a Linux-style bundle too, so
+        // one laid out by hand or by a Linux-targeting build still loads.
+        for (const auto* suffix : { "-nto", "-linux" })
+        {
+            const auto candidate = contents.getChildFile (machineName + suffix)
+                                           .getChildFile (soName);
+            if (candidate.existsAsFile())
+                return candidate;
+        }
+
+        return contents.getChildFile (machineName + "-nto").getChildFile (soName);
+       #elif JUCE_LINUX || JUCE_BSD
         const auto machineName = []() -> String
         {
             struct utsname unameData;
