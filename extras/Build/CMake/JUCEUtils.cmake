@@ -1273,6 +1273,15 @@ function(_juce_set_plugin_target_properties shared_code_target kind)
                 LIBRARY_OUTPUT_DIRECTORY "${output_path}/Contents/${JUCE_TARGET_ARCHITECTURE}-linux")
         endif()
 
+        # QNX gets the same bundle shape with its own platform suffix. Without
+        # this the target is emitted as a bare shared object named .vst3, which
+        # no host can scan - VST3PluginFormat looks inside Contents/<arch>-<os>.
+        if(CMAKE_SYSTEM_NAME STREQUAL "QNX")
+            set_target_properties(${target_name} PROPERTIES
+                SUFFIX .so
+                LIBRARY_OUTPUT_DIRECTORY "${output_path}/Contents/${JUCE_TARGET_ARCHITECTURE}-nto")
+        endif()
+
         _juce_set_copy_properties(${shared_code_target} ${target_name} "${output_path}" JUCE_VST3_COPY_DIR)
 
         _juce_adhoc_sign(${target_name})
