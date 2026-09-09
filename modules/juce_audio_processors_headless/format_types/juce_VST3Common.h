@@ -73,6 +73,25 @@ inline void toString128 (Steinberg::Vst::String128 result, const juce::String& s
  static const Steinberg::FIDString defaultVST3WindowType = Steinberg::kPlatformTypeNSView;
 #elif JUCE_LINUX || JUCE_BSD
  static const Steinberg::FIDString defaultVST3WindowType = Steinberg::kPlatformTypeX11EmbedWindowID;
+#elif JUCE_QNX
+ // Zenbox addition. QNX hosts plugins headlessly - nothing here ever opens a
+ // plugin editor, so this value is never used at runtime. It exists because
+ // the editor-attach path in juce_VST3PluginFormat.cpp still has to COMPILE,
+ // and without a branch here the module fails to build the moment
+ // JUCE_PLUGINHOST_VST3 is switched on:
+ //
+ //   juce_VST3PluginFormat.cpp:483: 'defaultVST3WindowType' was not declared
+ //
+ // That error reads like a missing QNX port and is not one. The fork already
+ // shares VST3 hosting between this module and juce_audio_processors, which
+ // includes juce_VST3PluginFormatImpl.h from here. Only the window type was
+ // missing, because JUCE_QNX is its own platform and matches none of the
+ // three cases above.
+ //
+ // X11's value as a placeholder, not as a claim: QNX Screen is not X11. If a
+ // plugin editor is ever embedded on this platform this has to be revisited
+ // rather than trusted.
+ static const Steinberg::FIDString defaultVST3WindowType = Steinberg::kPlatformTypeX11EmbedWindowID;
 #endif
 
 //==============================================================================
