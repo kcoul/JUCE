@@ -390,8 +390,20 @@ AAudioLoader::signature_I_PSCPM AAudioLoader::load_I_PSCPM(const char *functionN
     return reinterpret_cast<signature_I_PSCPM>(proc);
 }
 
-// Ensure that all AAudio primitive data types are int32_t
-#define ASSERT_INT32(type) static_assert(std::is_same<int32_t, type>::value, \
+// Ensure that all AAudio primitive data types are int32_t, or something with
+// int32_t's representation.
+//
+// NDK 30 turned AAudio_DeviceType and aaudio_policy_t from `typedef int32_t`
+// into `enum : int32_t`, which is a different TYPE while being the same thing
+// on the wire. What these asserts protect is the ABI of the function pointers
+// loaded below, so representation is the property that matters and identity was
+// only ever a proxy for it. The older aliases are still plain int32_t and still
+// take the first branch.
+//
+// std::underlying_type is deliberately not used: it is ill-formed for the
+// non-enum aliases, and every one of them goes through this macro.
+#define ASSERT_INT32(type) static_assert(std::is_same<int32_t, type>::value \
+        || (std::is_enum<type>::value && sizeof(type) == sizeof(int32_t)), \
 #type" must be int32_t")
 
 // Ensure that all AAudio primitive data types are uint32_t
