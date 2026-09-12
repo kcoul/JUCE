@@ -112,8 +112,11 @@ typedef int32_t AAudio_DeviceType;
 typedef int32_t aaudio_policy_t;
 #endif
 
-// TODO: find the first NDK version containing the following values
-#if OBOE_USING_NDK && __NDK_MAJOR__ <= 30
+// NDK 30 is the version that added these; the guard read `<= 30` under a TODO
+// asking which one it was, so on NDK 30 oboe redeclared all four of them and
+// every translation unit including this header failed to compile. Note the
+// block directly above, added for the same release, already says `< 30`.
+#if OBOE_USING_NDK && __NDK_MAJOR__ < 30
 typedef enum AAudio_FallbackMode : int32_t {
     AAUDIO_FALLBACK_MODE_DEFAULT = 0,
     AAUDIO_FALLBACK_MODE_MUTE = 1,
