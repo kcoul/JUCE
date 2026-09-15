@@ -1040,8 +1040,14 @@ public:
     {
         jassert (hasScanned); // need to call scanForDevices() before doing this
 
+       #if JUCE_QNX
+        // enumerateAlsaPCMDevices() has already moved the preferred device to the front
+        ignoreUnused (forInput);
+        return 0;
+       #else
         auto idx = (forInput ? inputIds : outputIds).indexOf ("default");
         return idx >= 0 ? idx : 0;
+       #endif
     }
 
     bool hasSeparateInputsAndOutputs() const override { return true; }
@@ -1091,17 +1097,50 @@ private:
             && id != "null";
     }
 
+    // USB interfaces first, then any card; on each, the unconverted hw: device before plughw:.
     static int findPreferredQnxDeviceIndex (const StringArray& ids)
     {
-        for (int i = 0; i < ids.size(); ++i)
-            if (ids[i].startsWithIgnoreCase ("plughw:") && ids[i].containsIgnoreCase ("CARD=USB"))
-                return i;
-
-        for (int i = 0; i < ids.size(); ++i)
-            if (ids[i].startsWithIgnoreCase ("plughw:"))
-                return i;
+        for (const auto usbOnly : { true, false })
+            for (auto* prefix : { "hw:", "plughw:" })
+                for (int i = 0; i < ids.size(); ++i)
+                    if (ids[i].startsWithIgnoreCase (prefix) && (! usbOnly || ids[i].containsIgnoreCase ("CARD=USB")))
+                        return i;
 
         return ids.indexOf ("default");
+    }
+
+    // QNX advertises its PCMs only as plughw:, whose plug layer silently converts sample format,
+    // rate and channel count. List the underlying hw: device too, wherever it can be opened.
+    void addQnxHardwareVariant (const String& plugId, const String& description, bool isInput, bool isOutput)
+    {
+        if (! plugId.startsWithIgnoreCase ("plughw:"))
+            return;
+
+        const auto hwId = "hw:" + plugId.substring (7);
+        const auto name = getQnxDisplayNameForPCMDevice (hwId, description.upToFirstOccurrenceOf ("\n", false, false));
+
+        if (isInput && ! inputIds.contains (hwId) && canOpenPCM (hwId, SND_PCM_STREAM_CAPTURE))
+        {
+            inputNames.add (name);
+            inputIds.add (hwId);
+        }
+
+        if (isOutput && ! outputIds.contains (hwId) && canOpenPCM (hwId, SND_PCM_STREAM_PLAYBACK))
+        {
+            outputNames.add (name);
+            outputIds.add (hwId);
+        }
+    }
+
+    static bool canOpenPCM (const String& id, snd_pcm_stream_t stream)
+    {
+        snd_pcm_t* handle = nullptr;
+        const auto result = snd_pcm_open (&handle, id.toUTF8(), stream, SND_PCM_NONBLOCK);
+
+        if (result >= 0)
+            snd_pcm_close (handle);
+
+        return result >= 0 || result == -EBUSY;
     }
 
     static String getQnxDisplayNameForPCMDevice (const String& id, const String& description)
@@ -1300,6 +1339,12 @@ private:
                 isInput  = isInput  && ! id.startsWith ("dmix");
                 isOutput = isOutput && ! id.startsWith ("dsnoop");
 
+               #if JUCE_QNX
+                // a hw: hint may already be listed as the twin of an earlier plughw: hint
+                isInput  = isInput  && ! inputIds.contains (id);
+                isOutput = isOutput && ! outputIds.contains (id);
+               #endif
+
                 if (isInput)
                 {
                     inputNames.add (name);
@@ -1311,6 +1356,10 @@ private:
                     outputNames.add (name);
                     outputIds.add (id);
                 }
+
+               #if JUCE_QNX
+                addQnxHardwareVariant (id, description, isInput, isOutput);
+               #endif
             }
 
             snd_device_name_free_hint (hints);
