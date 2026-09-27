@@ -3261,6 +3261,21 @@ private:
         VSTComSmartPtr<Vst::IAudioProcessor> processor;
         processor.loadFrom (component.get());
 
+        // Some plug-ins only build their audio buses in setupProcessing() -- Altiverb 8
+        // does, in any host it doesn't recognise by name -- and this is the only place
+        // the buses are read. setupIO() makes the same call with the same defaults
+        // straight after construction, so doing it first changes nothing for a plug-in
+        // that already had its buses, and lets a lazy one report them.
+        if (processor != nullptr)
+        {
+            Vst::ProcessSetup setup {};
+            setup.symbolicSampleSize = Vst::kSample32;
+            setup.maxSamplesPerBlock = 1024;
+            setup.sampleRate         = 44100.0;
+            setup.processMode        = Vst::kRealtime;
+            processor->setupProcessing (setup);
+        }
+
         for (const auto isInput : { true, false })
         {
             const Vst::BusDirection dir = (isInput ? Vst::kInput : Vst::kOutput);
