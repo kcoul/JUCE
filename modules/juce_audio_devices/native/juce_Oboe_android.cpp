@@ -57,6 +57,26 @@
 namespace juce
 {
 
+/* ZENBOX PATCH (instrumentation). Duplex counters, published lock-free from the audio
+   callback and read by ZenboxEngine's TransportPoller.
+
+   What they are for: the engine sees only the buffers JUCE hands it, so an input stream
+   that failed to deliver a full block is indistinguishable from one that did. These make
+   that visible. `shortReadBlocks` is the measurement that matters - see the note at the
+   read site.
+
+   Relaxed throughout: these are counters nobody makes a decision on, and an audio callback
+   must not pay for ordering it does not need.
+
+   Carry through every JUCE/tracktion submodule update, or delete with the rest of the
+   glitch-hunt instrumentation — see CLAUDE.md. */
+std::atomic<uint32_t> zenboxOboeCallbacks     { 0 };
+std::atomic<uint32_t> zenboxOboeShortReads    { 0 };   // blocks where input gave < numFrames
+std::atomic<uint32_t> zenboxOboeShortFrames   { 0 };   // frames missing, summed
+std::atomic<uint32_t> zenboxOboeReadErrors    { 0 };   // read() returned an error at all
+std::atomic<uint32_t> zenboxOboeOutputXRuns   { 0 };   // AAudio's own underrun count, output
+std::atomic<uint32_t> zenboxOboeInputXRuns    { 0 };   // and input
+
 template <typename OboeDataFormat>  struct OboeAudioIODeviceBufferHelpers {};
 
 template <>
@@ -996,6 +1016,33 @@ private:
 
                     auto result = nativeInputStream->read (inputStreamNativeBuffer.data(), numFrames, 0);
 
+                    /* ZENBOX PATCH (instrumentation). This read is NON-BLOCKING (timeout 0),
+                       so it returns whatever the input stream happens to hold - which can be
+                       fewer than numFrames. Only result.value() frames are converted below,
+                       inputStreamSampleBuffer is never cleared, and process() is handed
+                       numFrames regardless: on a short read the tail of the block is the
+                       PREVIOUS callback's microphone audio, replayed. JUCE's own comment at
+                       the process() call acknowledges the length can differ and then passes
+                       numFrames anyway.
+
+                       That is a candidate for the rare artifacts heard only with the monitor
+                       armed - a repeated chunk of voice through the pitch detector and a
+                       6.7 s reverb, independent of buffer size. Measure before patching: if
+                       these stay at zero over a run that glitched, the duplex path is
+                       exonerated and the cause is elsewhere. */
+                    if (result)
+                    {
+                        if (result.value() < numFrames)
+                        {
+                            zenboxOboeShortReads.fetch_add (1, std::memory_order_relaxed);
+                            zenboxOboeShortFrames.fetch_add ((uint32_t) (numFrames - result.value()),
+                                                             std::memory_order_relaxed);
+                        }
+                    }
+
+                    if (! result)
+                        zenboxOboeReadErrors.fetch_add (1, std::memory_order_relaxed);
+
                     if (result)
                     {
                         auto referringDirectlyToOboeData = OboeAudioIODeviceBufferHelpers<SampleType>
@@ -1036,6 +1083,19 @@ private:
 
                 if (isOutputLatencyDetectionSupported)
                     outputLatency = getLatencyFor (*outputStream);
+
+                /* ZENBOX PATCH (instrumentation). AAudio's own underrun counter, which is
+                   the authority on whether the OUTPUT missed a deadline - the thing every
+                   software explanation of a glitch has to beat. Read beside the latency
+                   polling above, which is heavier and already runs here. */
+                zenboxOboeCallbacks.fetch_add (1, std::memory_order_relaxed);
+
+                if (auto xr = outputStream->getNativeStream()->getXRunCount())
+                    zenboxOboeOutputXRuns.store ((uint32_t) xr.value(), std::memory_order_relaxed);
+
+                if (inputStream != nullptr)
+                    if (auto xr = inputStream->getNativeStream()->getXRunCount())
+                        zenboxOboeInputXRuns.store ((uint32_t) xr.value(), std::memory_order_relaxed);
             }
 
             return oboe::DataCallbackResult::Continue;
