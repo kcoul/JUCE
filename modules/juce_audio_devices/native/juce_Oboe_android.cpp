@@ -37,7 +37,19 @@
 #endif
 
 #if JUCE_OBOE_LOG_ENABLED
- #define JUCE_OBOE_LOG(x) DBG(x)
+ /* ZENBOX PATCH. Stock JUCE routes this through DBG, which compiles to nothing in a
+    Release build — and the engine archive the apps link IS Release (NDEBUG=1). So the
+    richest description of what Oboe was asked for and what it returned was being thrown
+    away on precisely the builds where Android's audio was failing.
+
+    `Logger::writeToLog` reaches logcat on Android and costs nothing while the device is
+    behaving: these lines only fire when a stream is opened, started or torn down, which
+    is a handful of times per launch. Gate it off again once USB routes are settled.
+
+    Carry through every JUCE/tracktion submodule update — see CLAUDE.md. */
+ #define JUCE_OBOE_LOG(x) JUCE_BLOCK_WITH_FORCED_SEMICOLON ( \
+     juce::String zenboxOboeLine ("[Oboe] "); zenboxOboeLine << x; \
+     juce::Logger::writeToLog (zenboxOboeLine); )
 #else
  #define JUCE_OBOE_LOG(x) {}
 #endif
@@ -208,6 +220,7 @@ public:
         close();
 
         lastError.clear();
+
 
         sampleRate = (int) (requestedSampleRate > 0 ? requestedSampleRate : AndroidHighPerformanceAudioHelpers::getNativeSampleRate());
         actualBufferSize = (bufferSize <= 0) ? getDefaultBufferSize() : bufferSize;
@@ -455,6 +468,35 @@ private:
         }
     }
 
+    /* ZENBOX PATCH. Set once a stream has been disconnected, so every subsequent open
+       asks for a shared, normal-performance stream instead of an exclusive low-latency
+       one.
+
+       Process-wide and sticky on purpose. The device is a singleton per app, and a route
+       that could not hold an exclusive stream a moment ago does not become able to hold
+       one by being asked again — which is precisely the loop stock JUCE falls into, since
+       `onErrorAfterClose` re-opens with the parameters that just failed.
+
+       STICKY WITHIN A RECOVERY ONLY. It used to be sticky for the whole process, and the
+       note here used to say that cost "latency for the rest of the session". That was the
+       wrong price: PerformanceMode::None means AAudio never elevates the callback thread to
+       SCHED_FIFO, so the cost is real-time scheduling itself, and the symptom is glitching
+       rather than delay. `OboeAudioIODevice::open` now clears this, so a deliberate
+       reconfigure asks for exclusive low latency again; the recovery paths below do not,
+       so a route that truly cannot carry MMAP still settles on shared/normal. See the long
+       note in open() for what was measured.
+
+       Carry this through every JUCE/tracktion submodule update, like the VST3
+       `getBusProperties()` patch — see CLAUDE.md. */
+    enum
+    {
+        zenboxFullRequest = 0,   ///< Exclusive + LowLatency: an MMAP grant.
+        zenboxSharedFast  = 1,   ///< Shared + LowLatency: the fast-mixer path. STILL SCHED_FIFO.
+        zenboxSharedSlow  = 2,   ///< Shared + None: the last resort, and no realtime thread.
+    };
+
+    inline static std::atomic<int> zenboxDegradeLevel { zenboxFullRequest };
+
     //==============================================================================
     class OboeStream
     {
@@ -479,7 +521,20 @@ private:
             return openResult == oboe::Result::OK;
         }
 
-        void start()
+        /* ZENBOX PATCH: returns whether the stream is actually running.
+        
+           Stock JUCE marked `requestStart()`'s result `[[maybe_unused]]` and then
+           OVERWROTE it with the result of `waitForStateChange`, so a refused start was
+           reported as success. On a Galaxy A17 with any USB-C audio device attached,
+           `requestStart()` returns ErrorDisconnected and JUCE logged "Starting Oboe stream
+           with result: OK" on the very next line — the device never ran, `isPlaying()`
+           answered true, no callback ever fired, and because the failure arrived as a
+           RETURN VALUE rather than through the async error callback, the disconnect
+           recovery path never ran either. Silent playback, permanently, on a route that
+           had worked days before.
+        
+           Carry through every JUCE/tracktion submodule update — see CLAUDE.md. */
+        bool start()
         {
             jassert (openedOk());
 
@@ -489,10 +544,13 @@ private:
                 auto nextState = oboe::StreamState::Started;
                 int64 timeoutNanos = 1000 * oboe::kNanosPerMillisecond;
 
-                [[maybe_unused]] auto startResult = stream->requestStart();
-                JUCE_OBOE_LOG ("Requested Oboe stream start with result: " + getOboeString (startResult));
+                const auto requestResult = stream->requestStart();
+                JUCE_OBOE_LOG ("Requested Oboe stream start with result: " + getOboeString (requestResult));
 
-                startResult = stream->waitForStateChange (expectedState, &nextState, timeoutNanos);
+                if (requestResult != oboe::Result::OK)
+                    return false;
+
+                auto startResult = stream->waitForStateChange (expectedState, &nextState, timeoutNanos);
 
                 JUCE_OBOE_LOG ("Starting Oboe stream with result: " + getOboeString (startResult)
                                  + "\nUses AAudio = " + String ((int) stream->usesAAudio())
@@ -509,7 +567,11 @@ private:
                                  + "\nBytesPerSample = " + String (stream->getBytesPerSample())
                                  + "\nPerformanceMode = " + getOboeString (stream->getPerformanceMode())
                                  + "\ngetDeviceId = " + String (stream->getDeviceId()));
+
+                return startResult == oboe::Result::OK;
             }
+
+            return false;
         }
 
         std::shared_ptr<oboe::AudioStream> getNativeStream() const
@@ -547,13 +609,72 @@ private:
             if (deviceId != -1)
                 builder.setDeviceId (deviceId);
 
-            // Note: letting OS to choose the buffer capacity & frames per callback.
+            /* ZENBOX PATCH: a FIXED callback size.
+
+               Stock JUCE lets the OS choose frames-per-callback, and Oboe then delivers
+               whatever it likes. Measured on a Galaxy A17 with a 2560-frame buffer
+               configured, consecutive callbacks arrived as:
+
+                   768, 768, 320, 640, 1280, 256, 640, 960 frames
+
+               Nothing downstream can be correct against that. The convolver's head
+               partition is sized to "the block", tracktion prepares its graph for a block,
+               and both were being handed a different number every time - which is the
+               whole reason a run of partition-size work today reduced CPU without ever
+               reducing the glitch rate. It also explains why iOS is flawless on identical
+               DSP: Core Audio delivers a fixed block.
+
+               `setFramesPerCallback` is Oboe's own way to demand one. It is set only when
+               a size was actually requested, so JUCE's default behaviour is unchanged for
+               anyone who passes 0.
+
+               Set to the hardware BURST, not to the requested buffer size. They are
+               different quantities and conflating them cost the stream its headroom: tying
+               the callback to a 2560-frame request made Oboe open with
+               BufferSizeInFrames = 1280 - one burst, no slack - and the glitching got
+               worse. The burst is the natural callback grain, and the buffer stays
+               whatever `setBufferSizeInFrames` asks for below, so a two-burst buffer keeps
+               a full burst of slack in front of a fixed-size callback.
+
+               Carry through every JUCE/tracktion submodule update - see CLAUDE.md. */
+            if (const auto burst = AndroidHighPerformanceAudioHelpers::getNativeBufferSizeHint();
+                burst > 0)
+            {
+                builder.setFramesPerCallback ((int32) burst);
+            }
+
             builder.setDirection (direction);
-            builder.setSharingMode (sharingMode);
+            /* ZENBOX PATCH — see the note on `degradeAfterDisconnect` below.
+               Stock JUCE asks every stream for Exclusive + LowLatency, which is an MMAP
+               grant. Some routes cannot sustain one: on a Galaxy A17, attaching ANY USB-C
+               audio device (with or without a microphone) disconnects the stream, and the
+               recovery path then asks for the identical configuration and is disconnected
+               again — audio stays dead until the app is relaunched. After a disconnect we
+               ask for something the hardware can actually keep. */
+            /* ZENBOX PATCH. TWO INDEPENDENT THINGS, GIVEN UP ONE AT A TIME.
+
+               This used to be a single boolean that surrendered BOTH the sharing mode and
+               the performance mode together, and that conflation was costing real-time
+               scheduling on every device that cannot do MMAP. `Shared` + `LowLatency` is an
+               ordinary supported configuration - the fast-mixer path - and AAudio still
+               elevates the callback thread to SCHED_FIFO for it, because the elevation
+               follows PerformanceMode, not SharingMode. Dropping to `None` as well threw
+               that away for nothing.
+
+               Measured on a Galaxy A17 with a wired headset: an Exclusive start is refused
+               with ErrorDisconnected EVERY time, not transiently - so that stage genuinely
+               has to be given up on this hardware. What must not be given up with it is
+               LowLatency, which is the only thing standing between the audio callback and
+               ordinary fair-share scheduling. */
+            const auto degradeLevel = zenboxDegradeLevel.load();
+
+            builder.setSharingMode (degradeLevel >= zenboxSharedFast ? oboe::SharingMode::Shared
+                                                                     : sharingMode);
             builder.setChannelCount (channelCount);
             builder.setFormat (format);
             builder.setSampleRate (newSampleRate);
-            builder.setPerformanceMode (oboe::PerformanceMode::LowLatency);
+            builder.setPerformanceMode (degradeLevel >= zenboxSharedSlow ? oboe::PerformanceMode::None
+                                                                          : oboe::PerformanceMode::LowLatency);
 
            #if JUCE_USE_ANDROID_OBOE_STABILIZED_CALLBACK
             if (newCallback != nullptr)
@@ -775,13 +896,52 @@ private:
 
         void start() override
         {
-            if (inputStream != nullptr)
-                inputStream->start();
+            if (! startStreams())
+            {
+                /* ZENBOX PATCH. The start was REFUSED, which stock JUCE could not see
+                   because it discarded the result (see OboeStream::start). Asking again
+                   with the same exclusive low-latency request would be refused the same
+                   way — that is the loop that left USB-C routes permanently silent — so
+                   the retry asks for a shared, normal-performance stream instead. Once
+                   only: if that is refused too, the route genuinely cannot carry us and a
+                   third attempt just delays the truth.
 
-            outputStream->start();
+                   REVERTED 2026-10-06 to exactly this, after an attempt to walk the stages
+                   one at a time (Shared+LowLatency before Shared+None, to keep SCHED_FIFO)
+                   regressed badly: it multiplied destroy/openStreams cycles on the arm path,
+                   which killed audio outright when the monitor engaged and wedged the app.
+                   The INSIGHT behind it still stands and is worth having - the FIFO
+                   elevation follows PerformanceMode, not SharingMode, so None is not
+                   required here - but extra retries at start() time are the wrong vehicle
+                   for it. Ask for less UP FRONT instead; do not add churn to a recovery. */
+                JUCE_OBOE_LOG ("Stream start refused — reopening without exclusive low latency");
+                zenboxDegradeLevel = zenboxSharedSlow;
+
+                destroyStreams();
+                openStreams();
+
+                if (! startStreams())
+                    JUCE_OBOE_LOG ("Stream start refused again; this route cannot be opened");
+            }
 
             isInputLatencyDetectionSupported  = isLatencyDetectionSupported (inputStream.get());
             isOutputLatencyDetectionSupported = isLatencyDetectionSupported (outputStream.get());
+        }
+
+        /// Both streams started, as reported by Oboe rather than assumed.
+        bool startStreams()
+        {
+            bool ok = true;
+
+            if (inputStream != nullptr)
+                ok = inputStream->start() && ok;
+
+            if (outputStream != nullptr)
+                ok = outputStream->start() && ok;
+            else
+                ok = false;
+
+            return ok;
         }
 
         void stop() override
@@ -974,6 +1134,12 @@ private:
 
             if (error != oboe::Result::ErrorDisconnected)
                 return;
+
+            /* ZENBOX PATCH: ask for less than we did last time - but only ONE stage less.
+               Re-opening with the same request is what left a USB-C route permanently
+               silent; dropping all the way to normal performance is what left it without a
+               realtime audio thread. See the note on the stages above. */
+            zenboxDegradeLevel = zenboxSharedSlow;
 
             openStreams();
             start();
