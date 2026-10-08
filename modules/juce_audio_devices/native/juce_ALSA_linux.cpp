@@ -516,6 +516,11 @@ public:
     {
         close();
 
+        writeTracePath = SystemStats::getEnvironmentVariable ("JUCE_ALSA_TRACE", {});
+
+        if (writeTracePath.isNotEmpty())
+            writeTrace.reserve (1 << 20);
+
         error.clear();
         sampleRate = newSampleRate;
         bufferSize = newBufferSize;
@@ -674,6 +679,7 @@ public:
         }
 
         stopThread (6000);
+        saveWriteTrace();
 
         inputDevice.reset();
         outputDevice.reset();
@@ -755,6 +761,13 @@ public:
                 if (avail < 0)
                     JUCE_ALSA_FAILED (snd_pcm_recover (outputDevice->handle, (int) avail, 0));
 
+                if (writeTracePath.isNotEmpty() && writeTrace.size() < writeTrace.capacity())
+                {
+                    snd_pcm_sframes_t delay = 0;
+                    snd_pcm_delay (outputDevice->handle, &delay);
+                    writeTrace.push_back ({ Time::getHighResolutionTicks(), (int64) avail, (int64) delay });
+                }
+
                 audioIoInProgress = true;
 
                 if (! outputDevice->writeToOutputDevice (outputChannelBuffer, bufferSize))
@@ -809,6 +822,27 @@ private:
     const String inputId, outputId;
     std::unique_ptr<ALSADevice> outputDevice, inputDevice;
     std::atomic<int> numCallbacks { 0 };
+
+    // Set JUCE_ALSA_TRACE to a file path to record avail and delay before every playback write
+    struct WriteTraceEntry { int64 ticks, avail, delay; };
+    std::vector<WriteTraceEntry> writeTrace;
+    String writeTracePath;
+
+    void saveWriteTrace()
+    {
+        if (writeTracePath.isEmpty() || writeTrace.empty())
+            return;
+
+        String text ("us,avail,delay\n");
+        const auto start = writeTrace.front().ticks;
+
+        for (auto& e : writeTrace)
+            text << String (Time::highResolutionTicksToSeconds (e.ticks - start) * 1.0e6, 0) << ","
+                 << String (e.avail) << "," << String (e.delay) << "\n";
+
+        File (writeTracePath).replaceWithText (text);
+        writeTrace.clear();
+    }
     std::atomic<bool> audioIoInProgress { false };
 
     CriticalSection callbackLock;
