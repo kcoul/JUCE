@@ -77,6 +77,17 @@ std::atomic<uint32_t> zenboxOboeReadErrors    { 0 };   // read() returned an err
 std::atomic<uint32_t> zenboxOboeOutputXRuns   { 0 };   // AAudio's own underrun count, output
 std::atomic<uint32_t> zenboxOboeInputXRuns    { 0 };   // and input
 
+/* THE LIVE BURST, which nothing else can see. `getAvailableBufferSizes()` is
+   derived from `getNativeBufferSize()` - the Android system property for the
+   BUILT-IN device - so it still reports a 96-frame burst while a USB-C headset
+   is driving the stream at 1280. Any floor computed from it is therefore
+   meaningless on a route the phone was not booted with, which is how a 1536
+   frame buffer (sixteen bursts on the speaker) ended up at one-and-a-fifth
+   bursts on a headset, below the two-burst minimum that keeps this phone from
+   glitching steadily. Published here because the stream is the only thing that
+   knows. Zero until a stream has been opened. */
+std::atomic<int32_t>  zenboxOboeFramesPerBurst { 0 };
+
 template <typename OboeDataFormat>  struct OboeAudioIODeviceBufferHelpers {};
 
 template <>
@@ -515,7 +526,32 @@ private:
         zenboxSharedSlow  = 2,   ///< Shared + None: the last resort, and no realtime thread.
     };
 
-    inline static std::atomic<int> zenboxDegradeLevel { zenboxFullRequest };
+    /* ZENBOX PATCH. STARTS AT SHARED, not Exclusive.
+
+       An AAudio EXCLUSIVE stream owns the device outright, so the system takes
+       it away the moment anything else wants audio - another app, a
+       notification, a route change, a USB-C headset arriving. That arrives as
+       `ErrorDisconnected`, and while JUCE recovers correctly (close, rebuild,
+       start OK, all visible in logcat) the music has already stopped. Measured
+       on a Galaxy A17, 2026-10-08: playback dying after ~16 s on the speaker
+       and after ~2 s with a headset, with disconnects as little as 0.7 s
+       apart. Nothing was wrong with the stream we were building; we were
+       asking for a stream the system is entitled to revoke.
+
+       The ladder below already knew Exclusive was fragile - it degrades to
+       Shared when a START is refused - but a stream that starts happily and is
+       DISCONNECTED later never reached that path. Starting one rung down fixes
+       the common case rather than recovering from it.
+
+       The price is about one burst of latency. `zenboxSharedFast` is Shared +
+       LowLatency, which is still the fast-mixer path and STILL SCHED_FIFO (see
+       the enum), so the realtime thread is kept - it is the exclusive MMAP
+       grant that is given up, and this app has no need to own the device. The
+       bottom rung is untouched and still catches the rest.
+
+       Revisit only with a measurement: if a future build genuinely needs the
+       MMAP path, it needs a disconnect-recovery story first. */
+    inline static std::atomic<int> zenboxDegradeLevel { zenboxSharedFast };
 
     //==============================================================================
     class OboeStream
@@ -648,19 +684,68 @@ private:
                a size was actually requested, so JUCE's default behaviour is unchanged for
                anyone who passes 0.
 
-               Set to the hardware BURST, not to the requested buffer size. They are
-               different quantities and conflating them cost the stream its headroom: tying
-               the callback to a 2560-frame request made Oboe open with
-               BufferSizeInFrames = 1280 - one burst, no slack - and the glitching got
-               worse. The burst is the natural callback grain, and the buffer stays
-               whatever `setBufferSizeInFrames` asks for below, so a two-burst buffer keeps
-               a full burst of slack in front of a fixed-size callback.
+               SET TO THE REQUESTED BUFFER SIZE, which is the number everything
+               downstream is prepared with - `getCurrentBufferSizeSamples()` returns
+               it, tracktion prepares its graph for it, and the monitor chain hands
+               it to the convolver as the block its partitioning is built around.
+
+               It used to be the hardware BURST, from
+               `getNativeBufferSizeHint()`. That is wrong twice. It is the
+               BUILT-IN device's system property, so it still reported 96 while a
+               USB-C headset drove the stream at 1280 - and more importantly it is
+               not the number anything downstream was prepared with. The callback
+               arrived with 192 frames while tracktion and the convolver were set
+               up for 1536: output underruns were ZERO and the sound was still
+               wrong, because a convolution reverb partitioned for one block and
+               fed another does not drop out, it distorts. Audible only with Mic
+               Monitor armed, which is the only place the convolver runs.
+
+               An earlier attempt at this did make things worse, and the reason is
+               the line below rather than this one: tying the callback to the
+               request while leaving the buffer AT the request leaves exactly one
+               callback of queue and no slack. The buffer is now explicitly two of
+               them. Callback and buffer are different quantities and both have to
+               move.
 
                Carry through every JUCE/tracktion submodule update - see CLAUDE.md. */
-            if (const auto burst = AndroidHighPerformanceAudioHelpers::getNativeBufferSizeHint();
-                burst > 0)
+            if (newBufferSize > 0)
             {
-                builder.setFramesPerCallback ((int32) burst);
+                builder.setFramesPerCallback ((int32) newBufferSize);
+
+                /* TWICE THE CAPACITY ON THE INPUT STREAM, AND ONLY THERE.
+
+                   The input needs it. AAudio sizes a stream's CAPACITY from
+                   `framesPerCallback` when nothing else asks, then refuses a
+                   buffer larger than capacity minus one burst - so the input
+                   settled at 1440 against a 1536 callback, one 96-frame burst
+                   short, forever. A third of all callbacks came up exactly 96
+                   frames short on the mic: 1.5% of the input gone, `xrunsIn`
+                   climbing in lockstep, and NOTHING on the output counters,
+                   which is why it is invisible without watching the input side.
+                   Dropped input frames are not a glitch you hear, they are
+                   pitch tracking quietly getting worse.
+
+                   The output must NOT have it, and the reason is worth more
+                   than the fix. Asking for output capacity made AAudio re-pick
+                   the stream's BURST - 192 -> 1280 on a route that had not
+                   changed, the headset never unplugged - and then 1706 frames
+                   against a 2560 callback: one and a half bursts per callback,
+                   a permanent phase mismatch, heard as a slow irregular drip of
+                   artifacts. It also moved the engine's chosen block size,
+                   because that was floored on the live burst, so ONE capacity
+                   hint re-shaped the whole DSP graph and read exactly like a
+                   route change. Measured 2026-10-09. Left alone the output
+                   takes capacity == callback and measures zero underruns.
+
+                   This asymmetry is not elegant and is not negotiable: in
+                   Shared mode the burst and the capacity belong to the audio
+                   server, our requests are HINTS it is free to reinterpret, and
+                   these are the two reinterpretations actually measured on this
+                   hardware. `setFramesPerCallback` is the only one of the three
+                   that Oboe enforces itself, which is why it is the number
+                   everything downstream is sized from. */
+                if (direction == oboe::Direction::Input)
+                    builder.setBufferCapacityInFrames ((int32) newBufferSize * 2);
             }
 
             builder.setDirection (direction);
@@ -721,8 +806,33 @@ private:
             JUCE_OBOE_LOG ("Building Oboe stream with result: " + getOboeString (openResult)
                  + "\nStream state = " + (stream != nullptr ? getOboeString (stream->getState()) : String ("?")));
 
+            /* THE ONE INVARIANT, CHECKED RATHER THAN ASSUMED.
+               Everything downstream is prepared for `newBufferSize`, so a stream
+               that hands us a different callback size is the whole class of bug
+               this file spent two nights on - and it is SILENT, because a
+               mis-sized callback distorts the convolver rather than underrunning
+               anything. `setFramesPerCallback` is the only one of our three
+               requests Oboe enforces itself, so if even this one drifts, say so
+               where the next person is already looking. */
+            if (stream != nullptr && newBufferSize != 0)
+                if (const auto got = (int) stream->getFramesPerCallback(); got != newBufferSize)
+                    JUCE_OBOE_LOG ("*** CALLBACK SIZE NOT HONOURED: asked "
+                                   + String (newBufferSize) + ", got " + String (got)
+                                   + " - the prepared DSP block no longer matches the callback");
+
             if (stream != nullptr && newBufferSize != 0)
             {
+                /* EXACTLY ONE CALLBACK of queue - and the doubled CAPACITY above is
+                   what makes it attainable rather than clamped to one burst less.
+
+                   Two callbacks were tried and are the wrong trade: the queue is
+                   monitor latency, and the callback already costs 32 ms at 1536
+                   frames. Doubling it puts a singer's own voice ~64 ms behind their
+                   mouth, which is distracting in precisely the feature that needs
+                   the input (VocalViz). One callback of queue measured zero output
+                   underruns on this phone over several minutes, so the slack is not
+                   needed; the capacity headroom is, because without it AAudio hands
+                   back capacity-minus-a-burst. */
                 JUCE_OBOE_LOG ("Setting the bufferSizeInFrames to " + String (newBufferSize));
                 stream->setBufferSizeInFrames (newBufferSize);
             }
@@ -934,8 +1044,14 @@ private:
                    elevation follows PerformanceMode, not SharingMode, so None is not
                    required here - but extra retries at start() time are the wrong vehicle
                    for it. Ask for less UP FRONT instead; do not add churn to a recovery. */
-                JUCE_OBOE_LOG ("Stream start refused — reopening without exclusive low latency");
-                zenboxDegradeLevel = zenboxSharedSlow;
+                /* ONE RUNG, not straight to the bottom. The note above has always
+                   said "only ONE stage less"; the code jumped to `zenboxSharedSlow`
+                   anyway, which is Shared + PerformanceMode::None - and None is
+                   precisely the rung with no SCHED_FIFO thread. A single refused
+                   start therefore cost the realtime thread for the rest of the
+                   session. */
+                JUCE_OBOE_LOG ("Stream start refused - reopening one stage lower");
+                zenboxDegradeLevel = jmin ((int) zenboxSharedSlow, zenboxDegradeLevel.load() + 1);
 
                 destroyStreams();
                 openStreams();
@@ -1093,6 +1209,14 @@ private:
                 if (auto xr = outputStream->getNativeStream()->getXRunCount())
                     zenboxOboeOutputXRuns.store ((uint32_t) xr.value(), std::memory_order_relaxed);
 
+                /* ZENBOX PATCH. The burst the stream is ACTUALLY running at -
+                   see the note on the atomic. Read beside the counters above
+                   rather than at open, so a route change that replaces the
+                   stream underneath us is reflected without needing a hook. */
+                if (auto ns = outputStream->getNativeStream())
+                    zenboxOboeFramesPerBurst.store (ns->getFramesPerBurst(),
+                                                    std::memory_order_relaxed);
+
                 if (inputStream != nullptr)
                     if (auto xr = inputStream->getNativeStream()->getXRunCount())
                         zenboxOboeInputXRuns.store ((uint32_t) xr.value(), std::memory_order_relaxed);
@@ -1195,11 +1319,28 @@ private:
             if (error != oboe::Result::ErrorDisconnected)
                 return;
 
-            /* ZENBOX PATCH: ask for less than we did last time - but only ONE stage less.
-               Re-opening with the same request is what left a USB-C route permanently
-               silent; dropping all the way to normal performance is what left it without a
-               realtime audio thread. See the note on the stages above. */
-            zenboxDegradeLevel = zenboxSharedSlow;
+            /* ZENBOX PATCH: A DISCONNECT IS NOT EVIDENCE AGAINST LOW LATENCY, so
+               nothing is degraded here any more.
+
+               This used to drop to `zenboxSharedSlow` - Shared + None, the rung
+               with no SCHED_FIFO thread - on every disconnect. A disconnect is an
+               ordinary event: a route change, a headset going in or out, the user
+               unplugging something. One of those therefore left the app without a
+               realtime audio thread for the remainder of the session, and it
+               never climbed back. Measured on a Galaxy A17, 2026-10-09: the
+               built-in speaker played cleanly (xrunsOut 0), a single deliberate
+               unplug-and-replug of a USB-C adapter dropped it to
+               `PerformanceMode = None`, and from then on every route glitched
+               steadily - which read as "it broke out of nowhere" because the
+               thing that broke it was two routes ago.
+
+               The degrade existed because re-opening with the SAME request left a
+               USB-C route permanently silent - but that was while the base
+               request was Exclusive. The base is now Shared (see
+               `zenboxDegradeLevel`'s initialiser), so reopening unchanged no
+               longer asks for the thing that was refused, and a genuinely
+               unsupported configuration is still caught where it should be: at a
+               refused START, which steps down one rung. */
 
             openStreams();
             start();
