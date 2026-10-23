@@ -365,4 +365,11 @@ protected:
     String name, typeName;
 };
 
+#if JUCE_IOS
+/** Zenbox (2026-10-22): see iOSAudioIODevice::setOutputUnitRunning. Declared here so a
+    host can reach it from the public AudioIODevice* without the native header.
+    Returns false when the device is not the iOS device or holds no unit. */
+bool setIOSOutputUnitRunning (AudioIODevice* device, bool shouldRun);
+#endif
+
 } // namespace juce

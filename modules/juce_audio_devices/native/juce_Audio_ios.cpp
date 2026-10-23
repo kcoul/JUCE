@@ -745,6 +745,19 @@ struct iOSAudioIODevice::Pimpl final : public AsyncUpdater
         }
     }
 
+    bool setOutputUnitRunning (bool shouldRun)
+    {
+        const ScopedLock myScopedLock (callbackLock);
+
+        if (audioUnit == nullptr || ! isRunning)
+            return false;
+
+        const auto err = shouldRun ? AudioOutputUnitStart (audioUnit)
+                                   : AudioOutputUnitStop  (audioUnit);
+        JUCE_IOS_AUDIO_LOG ("setOutputUnitRunning: " << (int) shouldRun << " -> " << (int) err);
+        return err == noErr;
+    }
+
     void start (AudioIODeviceCallback* newCallback)
     {
         if (isRunning && callback != newCallback)
@@ -1639,6 +1652,15 @@ void iOSAudioIODevice::close()                                      { pimpl->clo
 
 void iOSAudioIODevice::start (AudioIODeviceCallback* callbackToUse) { pimpl->start (callbackToUse); }
 void iOSAudioIODevice::stop()                                       { pimpl->stop(); }
+bool iOSAudioIODevice::setOutputUnitRunning (bool shouldRun)        { return pimpl->setOutputUnitRunning (shouldRun); }
+
+bool setIOSOutputUnitRunning (AudioIODevice* device, bool shouldRun)
+{
+    if (auto* ios = dynamic_cast<iOSAudioIODevice*> (device))
+        return ios->setOutputUnitRunning (shouldRun);
+
+    return false;
+}
 
 Array<double> iOSAudioIODevice::getAvailableSampleRates()           { return pimpl->availableSampleRates; }
 Array<int> iOSAudioIODevice::getAvailableBufferSizes()              { return pimpl->availableBufferSizes; }

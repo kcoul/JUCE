@@ -47,6 +47,18 @@ public:
     void start (AudioIODeviceCallback*) override;
     void stop() override;
 
+    /** Zenbox (2026-10-22): stop or restart the output unit behind an OPEN device,
+        without closing the device and without touching the AVAudioSession.
+
+        close() disposes the unit and then deactivates the session; open() activates
+        it and rewrites the category (with MixWithOthers). An app that owns its
+        session and only wants iOS to see its audio STOP — a pause the lock screen
+        must notice — needs neither, and both cost it the Now Playing role for a
+        moment. This is the stop/start that handleStatusChange already performs for
+        an interruption, minus the session calls. Returns false when no unit exists.
+    */
+    bool setOutputUnitRunning (bool shouldRun);
+
     Array<double> getAvailableSampleRates() override;
     Array<int> getAvailableBufferSizes() override;
 
