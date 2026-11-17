@@ -88,6 +88,16 @@ std::atomic<uint32_t> zenboxOboeInputXRuns    { 0 };   // and input
    knows. Zero until a stream has been opened. */
 std::atomic<int32_t>  zenboxOboeFramesPerBurst { 0 };
 
+/* ZENBOX PATCH (2026-11-16). WHICH MICROPHONE, chosen by the app.
+
+   An `AudioDeviceInfo` id from `AudioManager.getDevices(GET_DEVICES_INPUTS)`, or 0 for
+   "let Android route it". Used only when the input would otherwise open as System
+   Default: JUCE builds its named device list once, at start-up, so a USB-C headset
+   plugged in afterwards has no name to select it by, while Android's own id is current
+   at the moment the app reads it. Read when an input stream is BUILT, so it takes
+   effect on the next open - the engine reopens the input to apply it. */
+std::atomic<int32_t>  zenboxOboePreferredInputId { 0 };
+
 template <typename OboeDataFormat>  struct OboeAudioIODeviceBufferHelpers {};
 
 template <>
@@ -665,6 +675,11 @@ private:
             if (deviceId != -1)
                 builder.setDeviceId (deviceId);
 
+            // ZENBOX PATCH: the app's pick of microphone - see zenboxOboePreferredInputId.
+            if (direction == oboe::Direction::Input && deviceId == oboe::kUnspecified)
+                if (const auto preferred = zenboxOboePreferredInputId.load(); preferred > 0)
+                    builder.setDeviceId (preferred);
+
             /* ZENBOX PATCH: a FIXED callback size.
 
                Stock JUCE lets the OS choose frames-per-callback, and Oboe then delivers
@@ -749,6 +764,19 @@ private:
             }
 
             builder.setDirection (direction);
+            /* ZENBOX PATCH (2026-11-16). The microphone opens as VoiceRecognition.
+
+               Stock JUCE sets no preset, so Oboe takes the default - which on Android
+               routes the built-in mic through voice-comms processing: AGC, noise
+               suppression and echo cancellation. Echo cancellation fights a monitor
+               path, and AGC plus noise suppression is what wrecks pitch tracking, so
+               the Vocal Visualizer and the pitch-gated reverb read a processed,
+               pumping voice. VoiceRecognition is the preset the CDD requires every
+               device to support, and requires to run WITHOUT AGC or noise reduction;
+               Unprocessed is cleaner on paper but optional, and a device without it
+               falls back to something we cannot predict. */
+            if (direction == oboe::Direction::Input)
+                builder.setInputPreset (oboe::InputPreset::VoiceRecognition);
             /* ZENBOX PATCH — see the note on `degradeAfterDisconnect` below.
                Stock JUCE asks every stream for Exclusive + LowLatency, which is an MMAP
                grant. Some routes cannot sustain one: on a Galaxy A17, attaching ANY USB-C
